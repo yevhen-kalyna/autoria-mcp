@@ -203,10 +203,15 @@ class AutoRiaClient:
     ) -> Any:
         query = self._build_query(params, needs_user_id=needs_user_id)
         attempts = self._settings.max_retries + 1
+        # Only attach a JSON body when one is actually provided, so GETs (and
+        # body-less POSTs) never carry a payload or a Content-Type header.
+        request_kwargs: dict[str, Any] = {"params": query}
+        if json_body is not None:
+            request_kwargs["json"] = json_body
 
         for attempt in range(attempts):
             logger.debug("%s %s params=%s", method, path, _safe_params(query))
-            response = await self._http.request(method, path, params=query, json=json_body)
+            response = await self._http.request(method, path, **request_kwargs)
             status = response.status_code
 
             if status < 400:
