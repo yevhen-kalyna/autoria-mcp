@@ -15,7 +15,11 @@ from typing import Any
 
 import pytest
 
+from autoria_mcp.cache import MemoryCache, TwoTierCache
+from autoria_mcp.client import AutoRiaClient
 from autoria_mcp.config import Settings
+from autoria_mcp.dictionaries import DictionaryResolver
+from autoria_mcp.runtime import RuntimeContext
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -67,3 +71,27 @@ def make_settings(cache_dir: Path) -> Callable[..., Settings]:
 def settings(make_settings: Callable[..., Settings]) -> Settings:
     """A ready-to-use ``Settings`` instance with credentials."""
     return make_settings()
+
+
+@pytest.fixture
+def make_runtime() -> Callable[[Settings], RuntimeContext]:
+    """Factory for a hand-wired :class:`RuntimeContext` for tool unit tests.
+
+    Mirrors :func:`autoria_mcp.runtime.build_runtime` but injects ``noop_sleep``
+    so retry paths never wait. Use ``async with rt.client:`` to close the pool.
+    """
+
+    def _make(settings: Settings) -> RuntimeContext:
+        client = AutoRiaClient(settings, sleep=noop_sleep)
+        dict_cache = TwoTierCache(settings.cache_dir, max_memory_entries=settings.memory_cache_max)
+        volatile_cache = MemoryCache(settings.memory_cache_max)
+        resolver = DictionaryResolver(client, dict_cache)
+        return RuntimeContext(
+            settings=settings,
+            client=client,
+            resolver=resolver,
+            dict_cache=dict_cache,
+            volatile_cache=volatile_cache,
+        )
+
+    return _make

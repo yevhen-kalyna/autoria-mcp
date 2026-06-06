@@ -1,0 +1,57 @@
+{
+  "additional_params": {
+    "catalog_name": "",
+    "elastica": true,
+    "lang_id": "4",
+    "nodejs": true,
+    "page": 0,
+    "section": "auto",
+    "target": "search",
+    "view_type_id": 0
+  },
+  "result": {
+    "active_city": null,
+    "active_marka": { "marka_id": 9, "name": "BMW", "eng": "bmw" },
+    "active_model": null,
+    "active_state": null,
+    "additional": {
+      "query_string": "category_id=1&marka_id%5B0%5D=9&lang_id=4&langId=4",
+      "search_params": {
+        "all": {
+          "category_id": 1,
+          "marka_id": [9],
+          "model_id": [],
+          "currency": 1,
+          "abroad": false,
+          "searchType": 1,
+          "order_by": 0,
+          "countpage": 10
+        },
+        "cleaned": {
+          "category_id": 1,
+          "marka_id": [9],
+          "countpage": 10,
+          "searchType": 1,
+          "lang_id": "4"
+        }
+      },
+      "user_auto_positions": []
+    },
+    "isCommonSearch": true,
+    "search_result": {
+      "count": 19679,
+      "ids": ["39728975", "39837585", "39963555", "39844927", "39980299"],
+      "last_id": 0
+    },
+    "search_result_common": {
+      "count": 19679,
+      "last_id": 0,
+      "data": [
+        { "id": "39728975", "type": "UsedAuto" },
+        { "id": "39837585", "type": "UsedAuto" },
+        { "id": "100500", "type": "OfferOfTheDay" },
+        { "id": "39963555", "type": "UsedAuto" }
+      ]
+    }
+  }
+}

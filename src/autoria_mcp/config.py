@@ -48,6 +48,11 @@ class Settings(BaseSettings):
         host / port: Bind address for the HTTP transport. Ignored for stdio.
         cache_dir: Root directory for the on-disk dictionary cache (Phase 3).
         cache_ttl: Default dictionary cache TTL in seconds (default 7 days).
+        volatile_ttl: TTL for volatile, memory-only responses (search / statistics)
+            in seconds. These change quickly and must not be cached aggressively
+            or written to disk (default 10 minutes).
+        memory_cache_max: Upper bound on entries kept in each in-memory cache tier
+            (bounded LRU). Prevents the memory tier from growing without limit.
         max_retries: Max retry attempts for retryable responses (429 / 5xx).
         backoff_base: Base delay (seconds) for exponential backoff with jitter.
         backoff_cap: Upper bound (seconds) on a single backoff sleep.
@@ -92,6 +97,16 @@ class Settings(BaseSettings):
         default=7 * 24 * 60 * 60,
         ge=0,
         description="Default dictionary cache TTL in seconds.",
+    )
+    volatile_ttl: int = Field(
+        default=600,
+        ge=0,
+        description="TTL (seconds) for memory-only volatile responses (search/stats).",
+    )
+    memory_cache_max: int = Field(
+        default=256,
+        ge=1,
+        description="Max entries per in-memory cache tier (bounded LRU).",
     )
     max_retries: int = Field(
         default=3,

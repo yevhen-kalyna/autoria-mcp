@@ -1,18 +1,26 @@
-"""TTL cache abstraction for slow-changing dictionary data.
+"""TTL cache abstraction for AUTO.RIA responses.
 
-Phase 3 implements :class:`TwoTierCache`: an in-memory layer in front of a
-JSON-on-disk store under ``Settings.cache_dir``. Dictionary endpoints (marks,
-models, states, ...) change slowly and are expensive against the scarce API
-quota, so they are cached aggressively with a long per-entry TTL.
+Two cache implementations share the :class:`Cache` Protocol:
+
+  * :class:`TwoTierCache` — an in-memory layer (now a bounded LRU) in front of a
+    JSON-on-disk store under ``Settings.cache_dir``. Used for the large,
+    slow-changing *dictionaries* (marks, models, states, ...), which are cached
+    aggressively with a long per-entry TTL and persisted across restarts.
+  * :class:`MemoryCache` — a bounded, memory-only LRU with per-entry TTL. Used
+    for *volatile* responses (search, statistics) that change quickly and must
+    not be written to disk or kept around long.
 
 Design notes:
-  * Each entry stores an *absolute* expiry epoch, so TTL survives restarts.
+  * Each entry stores an *absolute* expiry epoch, so disk TTL survives restarts.
   * Disk writes are atomic (temp file in the same dir + ``os.replace``); a
     missing or corrupt file is treated as a cache miss, never an error.
   * Blocking file I/O runs in a worker thread so the async call path never
     blocks the event loop.
   * Cache keys exclude the ``api_key``/``user_id`` query params, so secrets are
     never written to disk and key order never changes the key.
+  * The in-memory tier of both caches is a bounded LRU: the least-recently-used
+    entry is evicted once ``max_entries`` is exceeded, so a long-running process
+    cannot grow memory without limit.
 
 The cache directory must stay out of git (see ``.gitignore``).
 """
@@ -26,6 +34,7 @@ import json
 import logging
 import os
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -73,23 +82,69 @@ def make_cache_key(path: str, params: dict[str, object] | None = None) -> str:
     return f"{path}?{query}"
 
 
+class _LruExpiryStore:
+    """A bounded, LRU-ordered map of ``key -> (absolute_expiry, value)``.
+
+    Not thread/async-safe on its own — callers hold their cache's lock around
+    every method. Eviction is least-recently-used: a ``get`` hit or a ``put``
+    moves the key to the most-recently-used end, and ``put`` evicts from the
+    least-recently-used end once ``max_entries`` is exceeded.
+    """
+
+    def __init__(self, max_entries: int | None) -> None:
+        self._max = max_entries
+        self._data: OrderedDict[str, tuple[float, object]] = OrderedDict()
+
+    def get(self, key: str, now: float) -> object | None:
+        """Return the live value for ``key``, dropping it if expired/absent."""
+        entry = self._data.get(key)
+        if entry is None:
+            return None
+        expiry, value = entry
+        if expiry <= now:
+            del self._data[key]
+            return None
+        self._data.move_to_end(key)
+        return value
+
+    def put(self, key: str, expiry: float, value: object) -> None:
+        self._data[key] = (expiry, value)
+        self._data.move_to_end(key)
+        if self._max is not None:
+            while len(self._data) > self._max:
+                self._data.popitem(last=False)  # evict least-recently-used
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+    def clear(self) -> None:
+        self._data.clear()
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
 class TwoTierCache:
-    """In-memory cache backed by an on-disk JSON store, with per-entry TTL.
+    """In-memory LRU cache backed by an on-disk JSON store, with per-entry TTL.
 
     Implements the :class:`Cache` protocol. Construct one per process and share
-    it across the client and resolver.
+    it across the client and resolver. The memory tier is a bounded LRU
+    (``max_memory_entries``); the disk tier is unbounded but TTL-expiring, so a
+    cold process still rehydrates from disk after a restart.
     """
 
     def __init__(
         self,
         cache_dir: Path,
         *,
+        max_memory_entries: int | None = None,
         time_fn: Callable[[], float] | None = None,
     ) -> None:
         self._dir = Path(cache_dir)
         # ``time_fn`` is injectable so tests can control expiry deterministically.
         self._now: Callable[[], float] = time_fn or time.time
-        self._memory: dict[str, tuple[float, object]] = {}
+        # ``None`` keeps the historical unbounded behavior for callers that omit a cap.
+        self._memory = _LruExpiryStore(max_memory_entries)
         self._lock = asyncio.Lock()
 
     def _path_for(self, key: str) -> Path:
@@ -102,14 +157,11 @@ class TwoTierCache:
         async with self._lock:
             now = float(self._now())
 
-            cached = self._memory.get(key)
-            if cached is not None:
-                expiry, value = cached
-                if expiry > now:
-                    return value
-                # Expired: drop from memory and fall through to (also-expired) disk.
-                del self._memory[key]
+            value = self._memory.get(key, now)
+            if value is not None:
+                return value
 
+            # Memory miss/expiry: fall through to the (possibly also-expired) disk tier.
             record = await asyncio.to_thread(self._read_disk, self._path_for(key))
             if record is None:
                 return None
@@ -117,13 +169,13 @@ class TwoTierCache:
             if expiry <= now:
                 return None
             # Populate the fast tier for subsequent hits this process.
-            self._memory[key] = (expiry, value)
+            self._memory.put(key, expiry, value)
             return value
 
     async def set(self, key: str, value: object, ttl: int) -> None:
         expiry = float(self._now()) + ttl
         async with self._lock:
-            self._memory[key] = (expiry, value)
+            self._memory.put(key, expiry, value)
             await asyncio.to_thread(self._write_disk, self._path_for(key), expiry, value)
 
     async def clear(self) -> None:
@@ -170,3 +222,36 @@ class TwoTierCache:
             for entry in self._dir.glob(pattern):
                 with contextlib.suppress(OSError):
                     entry.unlink()
+
+
+class MemoryCache:
+    """Bounded, memory-only LRU cache with per-entry TTL.
+
+    Implements the :class:`Cache` protocol. Used for volatile responses (search,
+    statistics) that change quickly: they live only in process memory for a
+    short TTL and are never written to disk. Bounded by ``max_entries`` (LRU
+    eviction), so it cannot grow without limit.
+    """
+
+    def __init__(
+        self,
+        max_entries: int,
+        *,
+        time_fn: Callable[[], float] | None = None,
+    ) -> None:
+        self._now: Callable[[], float] = time_fn or time.time
+        self._store = _LruExpiryStore(max_entries)
+        self._lock = asyncio.Lock()
+
+    async def get(self, key: str) -> object | None:
+        async with self._lock:
+            return self._store.get(key, float(self._now()))
+
+    async def set(self, key: str, value: object, ttl: int) -> None:
+        expiry = float(self._now()) + ttl
+        async with self._lock:
+            self._store.put(key, expiry, value)
+
+    async def clear(self) -> None:
+        async with self._lock:
+            self._store.clear()

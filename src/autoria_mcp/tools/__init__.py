@@ -1,22 +1,33 @@
 """FastMCP tool registry for autoria-mcp.
 
-Phase 2 registers only the health/``ping`` tool. Phases 3-4 add the curated
-high-level tools (``search_used_cars``, ``get_car_details``, ``get_average_price``,
-``lookup_brands``/``lookup_models``/``lookup_regions``) plus thin mirrors of the
-long-tail endpoints, each registered from its own module here.
+Each tool/resource group lives in its own module and exposes a ``register_*``
+function; :func:`register_all` wires them onto the FastMCP app. ``ping`` is
+registered first (it needs no runtime); the curated, paid, mirror, and resource
+groups follow.
 """
 
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from autoria_mcp.tools.details import register_details_tools
 from autoria_mcp.tools.health import register_health_tools
+from autoria_mcp.tools.lookups import register_lookup_tools
+from autoria_mcp.tools.mirrors import register_mirror_tools
+from autoria_mcp.tools.paid import register_paid_tools
+from autoria_mcp.tools.resources import register_resources
+from autoria_mcp.tools.search import register_search_tools
 
 
 def register_all(mcp: FastMCP) -> None:
-    """Register every tool module on the given FastMCP app."""
+    """Register every tool module and resource group on the given FastMCP app."""
     register_health_tools(mcp)
-    # TODO(phase 4): register_search_tools(mcp), register_lookup_tools(mcp), ...
+    register_lookup_tools(mcp)
+    register_search_tools(mcp)
+    register_details_tools(mcp)
+    register_paid_tools(mcp)
+    register_mirror_tools(mcp)
+    register_resources(mcp)
 
 
 __all__ = ["register_all"]
