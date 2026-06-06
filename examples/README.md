@@ -10,17 +10,34 @@ and talks to it over stdio; credentials are passed via `env`.
 Merge the `mcpServers.autoria` block into your Claude Desktop config:
 
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json` — but on the
+  Microsoft Store / MSIX build that path is virtualized, so don't hand-edit it.
+  Open it via **Settings → Developer → Edit Config** in the app instead, or your
+  MCP servers may silently fail to load. Start from
+  [`claude_desktop_config_windows.json`](claude_desktop_config_windows.json),
+  which uses a placeholder absolute `uvx.exe` path.
 
 Replace the placeholder `AUTORIA_API_KEY` (and `AUTORIA_USER_ID` if you use the
 paid POST endpoints) with your own values from <https://developers.ria.com>, then
-**fully quit** the client (`Cmd + Q` on macOS) and reopen it.
+**fully quit** the client (`Cmd + Q` on macOS, or right-click → **Quit** from the
+system tray on Windows) and reopen it.
 
 > **Use the full path to `uvx`, not just `uvx`.** Desktop apps are launched by the
 > OS without your shell's `PATH`, so a bare `"command": "uvx"` often fails with
-> "command not found". Run `which uvx` and use the absolute path it prints (e.g.
-> `/opt/homebrew/bin/uvx` on Apple Silicon, `/usr/local/bin/uvx` on Intel macOS).
-> The sample `claude_desktop_config.json` uses the bare name for brevity — swap in your full path.
+> "command not found". Find the absolute path and use it:
+>
+> - **macOS:** `which uvx` — e.g. `/opt/homebrew/bin/uvx` (Apple Silicon) or
+>   `/usr/local/bin/uvx` (Intel).
+> - **Windows:** `Get-Command uvx | Select-Object -ExpandProperty Source` in
+>   PowerShell, or `where.exe uvx` in `cmd` — e.g.
+>   `C:\Users\you\.local\bin\uvx.exe`. (In PowerShell use `where.exe`; plain
+>   `where` is an alias for `Where-Object`.) In JSON, double the backslashes
+>   (`C:\\Users\\you\\...`) or use forward slashes.
+>
+> The sample `claude_desktop_config.json` uses the bare name for brevity — swap in
+> your full path. The Windows sample
+> [`claude_desktop_config_windows.json`](claude_desktop_config_windows.json) ships
+> a placeholder absolute path.
 
 > Prefer not to put secrets in the client config? Omit the `env` block and put
 > `AUTORIA_API_KEY` in a `.env` file in your working directory or your shell env.

@@ -49,7 +49,10 @@ uv tool install autoria-mcp   # or: pipx install autoria-mcp
 ## Quickstart: Claude Desktop (no coding required)
 
 Want to use AUTO.RIA from the **Claude desktop app**? Follow these steps — no
-programming needed, just some copy-and-paste.
+programming needed, just some copy-and-paste. Pick your platform:
+[macOS](#macos) · [Windows](#windows).
+
+### macOS
 
 **1. Install `uv`** (the small tool that runs `autoria-mcp` for you). Open the
 **Terminal** app and paste this, then press Enter:
@@ -123,6 +126,108 @@ tail -50 ~/Library/Logs/Claude/mcp-server-autoria.log
 
 Most common fixes: use the **full `uvx` path** (step 3), and make sure you
 **fully quit** Claude with `Cmd + Q`.
+
+### Windows
+
+The same flow on Windows — the commands and a couple of Windows-only gotchas
+differ from macOS.
+
+**1. Install `uv`** (it ships the `uvx` command that runs `autoria-mcp`). Open
+**PowerShell** and run either:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+or, if you use [winget](https://learn.microsoft.com/windows/package-manager/):
+
+```powershell
+winget install --id=astral-sh.uv -e
+```
+
+Then **open a new terminal window** so the updated `PATH` takes effect.
+(Full instructions: <https://docs.astral.sh/uv/getting-started/installation/>.)
+
+**2. Get a free AUTO.RIA API key** at <https://developers.ria.com>. Keep it
+handy. A `user_id` is optional — you only need it for the paid price-statistics
+tools.
+
+**3. Find the full path to `uvx.exe`.** The desktop app can't see your terminal's
+`PATH`, so it needs the *full* path. In **PowerShell**, run:
+
+```powershell
+Get-Command uvx | Select-Object -ExpandProperty Source
+```
+
+or in **Command Prompt** (`cmd`):
+
+```bat
+where.exe uvx
+```
+
+Copy what it prints — usually `C:\Users\<you>\.local\bin\uvx.exe`.
+
+> **In PowerShell, use `where.exe`, not `where`.** Plain `where` is an alias for
+> `Where-Object` and won't find the executable.
+
+> **This is the #1 reason setup fails.** If you use just `uvx` instead of the full
+> path, the app says it can't find it. Always paste the full path from step 3.
+
+**4. Open Claude Desktop's config file — use the in-app button.** In the Claude
+app: **Settings → Developer → Edit Config**. This opens the correct
+`claude_desktop_config.json` for your install.
+
+> **Don't hand-edit the `%APPDATA%` file.** The documented location is
+> `%APPDATA%\Claude\claude_desktop_config.json`
+> (= `C:\Users\<you>\AppData\Roaming\Claude\claude_desktop_config.json`), but the
+> **Microsoft Store / MSIX** build of Claude *virtualizes* that folder — it
+> actually reads from
+> `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`.
+> Editing the plain `%APPDATA%` copy then makes your MCP servers **silently fail
+> to load**. The **Edit Config** button always opens the right file — use it.
+
+**5. Add the `autoria` server.** Paste the block below. If the file already has a
+`"mcpServers"` section, add `"autoria"` *inside* it next to your other servers;
+otherwise paste the whole thing. On Windows, backslashes in JSON must be
+**doubled** (`\\`) — or use forward slashes (`C:/Users/you/.local/bin/uvx.exe`):
+
+```json
+{
+  "mcpServers": {
+    "autoria": {
+      "command": "C:\\Users\\you\\.local\\bin\\uvx.exe",
+      "args": ["autoria-mcp"],
+      "env": { "AUTORIA_API_KEY": "paste-your-api-key-here" }
+    }
+  }
+}
+```
+
+- `command` → the full path from step 3, with doubled backslashes.
+- `AUTORIA_API_KEY` → your key from step 2.
+- For the paid tools (average price, VIN lookup), add `"AUTORIA_USER_ID": "..."`
+  to `env` — put a comma after the API-key line when you do, e.g.
+  `"env": { "AUTORIA_API_KEY": "...", "AUTORIA_USER_ID": "..." }`.
+
+Save the file. A ready-to-edit copy is at
+[`examples/claude_desktop_config_windows.json`](examples/claude_desktop_config_windows.json).
+
+> Prefer not to keep your key in the config? Omit the `env` block and instead put
+> `AUTORIA_API_KEY` in a `.env` file in the working directory, or set it as a
+> Windows user/system environment variable.
+
+**6. Fully restart Claude.** Right-click the Claude icon in the **system tray**
+(near the clock) and choose **Quit** — just closing the window isn't enough —
+then open Claude again. The **first** start takes a few seconds while it
+downloads the tool; after that it's instant.
+
+**7. Try it.** Ask Claude something like:
+*"Use autoria to find used BMW 3 Series cars in Kyiv and show me a few with prices."*
+
+The same [limits](#quickstart-claude-desktop-no-coding-required) and most-common
+fixes apply: use the **full `uvx.exe` path** (step 3), edit the config via the
+**in-app button** (step 4), and **fully quit** from the tray (step 6). Logs are at
+`%APPDATA%\Claude\logs\mcp-server-autoria.log`.
 
 ## Configuration
 
