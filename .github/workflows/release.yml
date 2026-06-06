@@ -27,6 +27,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fail fast before any publish if the version is inconsistent across the
+      # three places it now lives: pyproject, server.json (twice), and — on a
+      # tag run — the git tag itself. Until dynamic versioning lands, this guard
+      # is the only thing stopping a silent drift between PyPI and the registry.
+      - name: Guard — versions agree (pyproject == server.json == tag)
+        run: |
+          PYPROJECT_VER=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          SERVER_VER=$(jq -r '.version' server.json)
+          SERVER_PKG_VER=$(jq -r '.packages[0].version' server.json)
+          echo "pyproject=$PYPROJECT_VER  server.json=$SERVER_VER  packages[0]=$SERVER_PKG_VER  ref=$GITHUB_REF"
+          if [ "$PYPROJECT_VER" != "$SERVER_VER" ] || [ "$PYPROJECT_VER" != "$SERVER_PKG_VER" ]; then
+            echo "::error::version mismatch — pyproject=$PYPROJECT_VER server.json=$SERVER_VER packages[0]=$SERVER_PKG_VER"
+            exit 1
+          fi
+          # On a `v*` tag run, the tag must match too (workflow_dispatch has no tag).
+          if [ "$GITHUB_REF" != "${GITHUB_REF#refs/tags/v}" ]; then
+            TAG_VER="${GITHUB_REF#refs/tags/v}"
+            if [ "$PYPROJECT_VER" != "$TAG_VER" ]; then
+              echo "::error::tag v$TAG_VER does not match version $PYPROJECT_VER"
+              exit 1
+            fi
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -105,3 +128,55 @@ jobs:
         # --check-url makes re-runs idempotent (skip already-uploaded files);
         # --trusted-publishing always fails loudly if OIDC is misconfigured.
         run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/
+
+  publish-registry:
+    name: Publish to MCP Registry (OIDC)
+    # Only after a real tag publish to PyPI: the registry is metadata-only and
+    # validates against the live PyPI release (incl. the README `mcp-name` marker).
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC to the MCP Registry (GitHub identity); no secrets/tokens
+      contents: read
+    steps:
+      # server.json lives in the repo, so unlike publish-pypi this job needs a checkout.
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        # Official one-liner; pulls the latest release binary for this runner's OS/arch.
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Pin server.json version to the tag
+        # Defense in depth against drift: the published metadata always matches the
+        # tag, regardless of what was committed. ($GITHUB_REF, not ${{ }} — no injection.)
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
+          mv server.tmp server.json
+          echo "server.json pinned to $VERSION"
+
+      - name: Wait for PyPI to expose the new version + marker
+        # publish-pypi already uploaded the wheel; this covers the short lag before
+        # the JSON API serves the new release with the ownership marker the registry
+        # validates against. Fail loudly if it never appears.
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          for i in $(seq 1 30); do
+            if curl -fsSL "https://pypi.org/pypi/autoria-mcp/${VERSION}/json" \
+                 | grep -q "mcp-name: io.github.yevhen-kalyna/autoria-mcp"; then
+              echo "PyPI ${VERSION} is live with the marker."
+              exit 0
+            fi
+            echo "PyPI not ready for ${VERSION} (attempt $i/30), sleeping 10s…"
+            sleep 10
+          done
+          echo "::error::PyPI did not expose ${VERSION} with the mcp-name marker in time"
+          exit 1
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

@@ -1,5 +1,7 @@
 # autoria-mcp
 
+<!-- mcp-name: io.github.yevhen-kalyna/autoria-mcp -->
+
 [![CI](https://github.com/yevhen-kalyna/autoria-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/yevhen-kalyna/autoria-mcp/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/autoria-mcp.svg)](https://pypi.org/project/autoria-mcp/)
 [![Python versions](https://img.shields.io/pypi/pyversions/autoria-mcp.svg)](https://pypi.org/project/autoria-mcp/)
@@ -81,7 +83,7 @@ Developer → Edit Config**. This opens a file called `claude_desktop_config.jso
 
 **5. Add the `autoria` server.** Paste the block below. If the file already has a
 `"mcpServers"` section, add `"autoria"` *inside* it next to your other servers;
-otherwise paste the whole thing. Replace the three placeholder values:
+otherwise paste the whole thing. Replace the two placeholder values:
 
 ```json
 {
@@ -89,10 +91,7 @@ otherwise paste the whole thing. Replace the three placeholder values:
     "autoria": {
       "command": "/opt/homebrew/bin/uvx",
       "args": ["autoria-mcp"],
-      "env": {
-        "AUTORIA_API_KEY": "paste-your-api-key-here",
-        "AUTORIA_USER_ID": "paste-your-user-id-here-or-remove-this-line"
-      }
+      "env": { "AUTORIA_API_KEY": "paste-your-api-key-here" }
     }
   }
 }
@@ -100,7 +99,9 @@ otherwise paste the whole thing. Replace the three placeholder values:
 
 - `command` → the full path from step 3.
 - `AUTORIA_API_KEY` → your key from step 2.
-- `AUTORIA_USER_ID` → your user id, or delete that line if you don't have one.
+- For the paid tools (average price, VIN lookup), add `"AUTORIA_USER_ID": "..."`
+  to `env` — put a comma after the API-key line when you do, e.g.
+  `"env": { "AUTORIA_API_KEY": "...", "AUTORIA_USER_ID": "..." }`.
 
 Save the file.
 
