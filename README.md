@@ -44,6 +44,85 @@ Or install into a tool environment with `pipx` / `uv tool`:
 uv tool install autoria-mcp   # or: pipx install autoria-mcp
 ```
 
+## Quickstart: Claude Desktop (no coding required)
+
+Want to use AUTO.RIA from the **Claude desktop app**? Follow these steps — no
+programming needed, just some copy-and-paste.
+
+**1. Install `uv`** (the small tool that runs `autoria-mcp` for you). Open the
+**Terminal** app and paste this, then press Enter:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+(Full instructions: <https://docs.astral.sh/uv/getting-started/installation/>.)
+
+**2. Get a free AUTO.RIA API key** at <https://developers.ria.com>. Keep it handy.
+A `user_id` is optional — you only need it for the paid price-statistics tools.
+
+**3. Find the full path to `uvx`.** The desktop app can't see your Terminal's
+settings, so it needs the *full* path. In Terminal, run:
+
+```sh
+which uvx
+```
+
+Copy what it prints — usually `/opt/homebrew/bin/uvx` (Apple-Silicon Mac) or
+`/usr/local/bin/uvx` (Intel Mac).
+
+> **This is the #1 reason setup fails.** If you use just `uvx` instead of the full
+> path, the app says it can't find it. Always paste the full path from `which uvx`.
+
+**4. Open Claude Desktop's config file.** In the Claude app: **Settings →
+Developer → Edit Config**. This opens a file called `claude_desktop_config.json`
+(on macOS it lives at
+`~/Library/Application Support/Claude/claude_desktop_config.json`).
+
+**5. Add the `autoria` server.** Paste the block below. If the file already has a
+`"mcpServers"` section, add `"autoria"` *inside* it next to your other servers;
+otherwise paste the whole thing. Replace the three placeholder values:
+
+```json
+{
+  "mcpServers": {
+    "autoria": {
+      "command": "/opt/homebrew/bin/uvx",
+      "args": ["autoria-mcp"],
+      "env": {
+        "AUTORIA_API_KEY": "paste-your-api-key-here",
+        "AUTORIA_USER_ID": "paste-your-user-id-here-or-remove-this-line"
+      }
+    }
+  }
+}
+```
+
+- `command` → the full path from step 3.
+- `AUTORIA_API_KEY` → your key from step 2.
+- `AUTORIA_USER_ID` → your user id, or delete that line if you don't have one.
+
+Save the file.
+
+**6. Fully quit and reopen Claude.** Press **`Cmd + Q`** (just closing the window
+isn't enough), then open Claude again. The **first** start takes a few seconds
+while it downloads the tool; after that it's instant.
+
+**7. Try it.** Ask Claude something like:
+*"Use autoria to find used BMW 3 Series cars in Kyiv and show me a few with prices."*
+
+> **Heads-up on limits:** the free AUTO.RIA key allows roughly **30 requests/hour**
+> and **1000/month** — so ask focused questions rather than broad ones.
+
+**If autoria doesn't show up** after restarting, the log file usually says why:
+
+```sh
+tail -50 ~/Library/Logs/Claude/mcp-server-autoria.log
+```
+
+Most common fixes: use the **full `uvx` path** (step 3), and make sure you
+**fully quit** Claude with `Cmd + Q`.
+
 ## Configuration
 
 All settings are read from environment variables (prefix `AUTORIA_`) or a local

@@ -14,10 +14,19 @@ Merge the `mcpServers.autoria` block into your Claude Desktop config:
 
 Replace the placeholder `AUTORIA_API_KEY` (and `AUTORIA_USER_ID` if you use the
 paid POST endpoints) with your own values from <https://developers.ria.com>, then
-restart the client.
+**fully quit** the client (`Cmd + Q` on macOS) and reopen it.
+
+> **Use the full path to `uvx`, not just `uvx`.** Desktop apps are launched by the
+> OS without your shell's `PATH`, so a bare `"command": "uvx"` often fails with
+> "command not found". Run `which uvx` and use the absolute path it prints (e.g.
+> `/opt/homebrew/bin/uvx` on Apple Silicon, `/usr/local/bin/uvx` on Intel macOS).
+> The config below uses the bare name for brevity — swap in your full path.
 
 > Prefer not to put secrets in the client config? Omit the `env` block and put
 > `AUTORIA_API_KEY` in a `.env` file in your working directory or your shell env.
+
+> **New to this?** The main [README](../README.md#quickstart-claude-desktop-no-coding-required)
+> has a step-by-step, non-technical walkthrough for Claude Desktop.
 
 ## `mcp_http_config.json` — streamable-HTTP
 
