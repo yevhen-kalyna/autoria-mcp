@@ -29,3 +29,31 @@ AUTORIA_API_KEY=... AUTORIA_TRANSPORT=http autoria-mcp --host 127.0.0.1 --port 8
 ```
 
 then point the client at `http://127.0.0.1:8000/mcp`.
+
+## A typical agent flow
+
+Once wired in, an agent answers a question like *"what do used BMW 3 Series go for
+in Kyiv?"* by chaining a few tools — resolving names to ids before searching, then
+pulling detail only for the listings it cares about (each call spends scarce quota):
+
+1. **`lookup_brands` / `lookup_models`** — resolve `"BMW"` and `"3 Series"` to their
+   numeric ids (cached for 7 days, so this costs quota only once). The curated
+   `search_used_cars` does this resolution for you, so you can also skip straight to
+   step 2 with plain names.
+2. **`search_used_cars`** — search by brand/model/region/year/price; returns advert
+   `ids`, a `count`, and a set-level `search_url` (a deep link back to auto.ria.com).
+3. **`get_car_details`** — for each interesting id, fetch the compact listing (price,
+   year, mileage, VIN-if-shown, masked phone, and the canonical per-listing URL).
+4. **`get_average_price`** — *(paid; needs `AUTORIA_USER_ID`)* get AUTO.RIA's AI
+   average price plus comparable listings to judge whether an asking price is fair.
+
+## `inproc_session.py` — drive the server from Python
+
+[`inproc_session.py`](inproc_session.py) connects an in-memory MCP client to the
+server in a single process, lists the full tool/resource surface, and calls the
+zero-quota `ping` tool. It needs no API key and makes no network calls — a quick way
+to confirm the server is wired correctly:
+
+```sh
+uv run python examples/inproc_session.py
+```

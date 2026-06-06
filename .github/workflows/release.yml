@@ -1,16 +1,28 @@
 name: Release
 
+# Two paths share one build:
+#   * push a `v*` tag        -> publish to PyPI      (environment: pypi,     reviewer-gated)
+#   * "Run workflow" button  -> publish to TestPyPI  (environment: testpypi, ungated dry-run)
+# The tag run never touches TestPyPI (avoids version-collision pain); do a manual
+# dry-run first, then tag. Publishing uses OIDC Trusted Publishing — no tokens.
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Serialize runs per ref; never cancel an in-flight publish (interrupting an
+# upload is worse than letting a duplicate run fail fast on "already exists").
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
-    name: Build distributions
+    name: Build + check distributions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,21 +35,60 @@ jobs:
       - name: Build sdist + wheel
         run: uv build
 
+      - name: Validate metadata (twine check)
+        run: uvx twine check dist/*
+
+      - name: Smoke test the built wheel (entry point resolves)
+        run: uvx --from dist/*.whl autoria-mcp --version
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish:
-    name: Publish to PyPI (Trusted Publishing / OIDC)
+  publish-testpypi:
+    name: Publish to TestPyPI (dry-run)
+    if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: pypi
+      name: testpypi
+      url: https://test.pypi.org/p/autoria-mcp
+    permissions:
+      id-token: write  # OIDC Trusted Publishing; no token needed
+    steps:
+      # Checkout FIRST (it runs `git clean`, which would wipe a pre-downloaded
+      # dist/): `uv publish --index testpypi` resolves the index name from
+      # pyproject.toml's [[tool.uv.index]], so the project file must be present.
+      - uses: actions/checkout@v4
+
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Publish to TestPyPI
+        # --check-url makes re-runs idempotent (skip already-uploaded files);
+        # --trusted-publishing always fails loudly if OIDC is misconfigured.
+        run: uv publish --index testpypi --trusted-publishing always --check-url https://test.pypi.org/simple/
+
+  publish-pypi:
+    name: Publish to PyPI (Trusted Publishing / OIDC)
+    # event_name guard keeps a tag-ref workflow_dispatch from also hitting PyPI:
+    # the two publish paths are mutually exclusive by construction.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi  # add a required reviewer on this environment in repo settings
       url: https://pypi.org/p/autoria-mcp
     permissions:
-      id-token: write  # mandatory for OIDC Trusted Publishing; no PyPI token needed
+      id-token: write  # OIDC Trusted Publishing; no token needed
     steps:
       - name: Download built distributions
         uses: actions/download-artifact@v4
@@ -49,4 +100,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Publish to PyPI
-        run: uv publish
+        # --check-url makes re-runs idempotent (skip already-uploaded files);
+        # --trusted-publishing always fails loudly if OIDC is misconfigured.
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/

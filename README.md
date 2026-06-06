@@ -1,14 +1,19 @@
 # autoria-mcp
 
+[![CI](https://github.com/yevhen-kalyna/autoria-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/yevhen-kalyna/autoria-mcp/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/autoria-mcp.svg)](https://pypi.org/project/autoria-mcp/)
+[![Python versions](https://img.shields.io/pypi/pyversions/autoria-mcp.svg)](https://pypi.org/project/autoria-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 An [MCP](https://modelcontextprotocol.io) server that exposes the
 **AUTO.RIA used-cars REST API** (`auto.ria.com`, via `developers.ria.com`) to AI
 agents — programmatic, agent-friendly access to the Ukrainian used-car market
 through the sanctioned API, no scraping.
 
-> **Status: Phase 4.** The full tool surface is live — curated search/lookup
-> tools, paid statistics tools, thin endpoint mirrors, and browsable dictionary
-> resources — all backed by caching and the typed async client. Docs polish and
-> the first PyPI release are next; see [Roadmap](#roadmap).
+The full tool surface is live — **29 tools, 7 dictionary resources, and 1
+templated resource**: curated search/lookup tools, paid statistics tools, thin
+endpoint mirrors, and browsable dictionary resources, all backed by tiered
+caching and a typed async client.
 
 ## Features
 
@@ -128,6 +133,36 @@ body-styles,states}` and the templated `autoria://dict/models/{categoryId}/{mark
 
 **Health**: `ping` — zero-quota liveness/diagnostic check.
 
+## Attribution
+
+AUTO.RIA's API terms require a **visible link back to `auto.ria.com`** wherever you
+display data sourced from the API. Every tool that returns listings honours this
+for you: `get_car_details` and the paid endpoints include a canonical per-listing
+deep link, and `search_used_cars` returns a set-level `search_url` (search itself
+returns only ids). Keep these links visible in whatever surface presents the
+results to an end user.
+
+## Known limitations
+
+These are deliberate scope/behaviour choices worth knowing before you rely on them:
+
+- **Single brand/model per search.** Multi-brand or multi-model search is not yet
+  modelled by `search_used_cars`. For OR-style queries across several brands, drop
+  to `raw_search` and pass the raw V1 params yourself.
+- **Search returns ids, not full listings.** `search_used_cars` gives you advert
+  ids, a `count`, and a set-level `search_url`. Fetch per-listing detail (price,
+  year, mileage, URL, masked phone) with `get_car_details` for each id you care
+  about — each call spends quota, so resolve only what you need.
+- **Search is V1-only and silently ignores unknown params** — a genuine footgun.
+  The underlying `/auto/search` endpoint does not validate filter keys: a misspelt
+  or unsupported param is dropped, and the search quietly widens to the whole site
+  instead of erroring. The curated tool resolves names to the correct V1 ids to
+  avoid this, but `raw_search` passes your params through verbatim.
+- **Paid POST errors arrive as HTTP 200.** The paid endpoints return errors in the
+  body (`noticeType: "error"`) with a 200 status; the paid tools detect and surface
+  these as tool errors.
+- **`get_average_price_over_periods`** accepts only `period ∈ {30, 90, 180, 365}`.
+
 ## Development
 
 ```sh
@@ -149,7 +184,11 @@ The OpenAPI 3.1 description lives in
 3. ✅ **Phase 3** — typed async client, TTL dictionary cache, name→ID resolution,
    recorded-fixture tests (zero live quota).
 4. ✅ **Phase 4** — curated + paid + thin tools, dictionary MCP resources.
-5. ⏭️ **Phase 5** — docs, examples, first PyPI release.
+5. ✅ **Phase 5** — docs, examples, first PyPI release (`0.1.0`).
+
+**Post-1.0 backlog** (not scheduled): native multi-brand / multi-model search;
+per-endpoint cache TTLs; a cross-process quota lock (current accounting is
+per-process, warn-only); an `npx` shim for Node-based MCP clients.
 
 ## License
 
