@@ -1,0 +1,44 @@
+# --- Secrets & local config (NEVER commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Research / captured live responses (contain user_id; never published) ---
+research/
+**/probe_responses/
+
+# --- On-disk caches (dictionary cache, tooling caches) ---
+# Default dictionary cache lives under ~/.cache/autoria-mcp (outside the repo).
+# These cover the case where AUTORIA_CACHE_DIR points at a local ./cache.
+.cache/
+/cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# --- Virtualenvs ---
+.venv/
+venv/
+env/
+
+# --- Coverage ---
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store

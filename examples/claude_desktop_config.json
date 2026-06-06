@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "autoria": {
+      "command": "uvx",
+      "args": ["autoria-mcp"],
+      "env": {
+        "AUTORIA_API_KEY": "your-developers-ria-com-api-key",
+        "AUTORIA_USER_ID": "your-user-id-for-paid-endpoints"
+      }
+    }
+  }
+}

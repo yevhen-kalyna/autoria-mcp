@@ -1,0 +1,2538 @@
+openapi: 3.1.0
+
+info:
+  title: AUTO.RIA Used Cars API (developers.ria.com)
+  version: 0.1.0
+  summary: >-
+    Sanctioned REST API for searching and looking up used-car listings on
+    auto.ria.com, plus the dictionary endpoints needed to resolve human-friendly
+    names into the numeric IDs the search expects.
+  description: |
+    Unofficial OpenAPI 3.1 description of the **AUTO.RIA Used Cars** web services
+    exposed at `https://developers.ria.com`, reverse-engineered from the official
+    developer wiki (developers.ria.com) as of the page revisions dated up to
+    2026-04. This spec drives the `autoria-mcp` MCP server (v1 scope: used cars).
+
+    ## Authentication
+    Every request requires a personal API key passed as the **query parameter
+    `api_key`** (`securitySchemes.ApiKeyAuth`, applied globally). The paid POST
+    endpoints additionally require a **`user_id` query parameter** (modeled
+    per-operation, not as a security scheme). Never log or hardcode the key.
+
+    ## Quota (critical — requests are scarce)
+    Free package limits, enforced per API key across **all** RIA.com web
+    services:
+      * **~1000 requests / month**
+      * **30 requests / hour** (hourly counters reset on a rolling basis)
+    Exceeding either limit temporarily blocks the key and returns
+    `429 OVER_RATE_LIMIT`; the block clears within the next hour or calendar day.
+    "Work with your own listings" (publishing/cabinet) APIs are **not** metered,
+    but those are out of scope for v1.
+
+    ## Caching guidance
+    The dictionary endpoints (`tags: dictionaries`) are large and change slowly.
+    **Cache them aggressively (7–30 day TTL, disk + memory)** and resolve
+    name→ID once. Search/listing/statistics responses are volatile and should
+    not be cached beyond a few minutes. Treat every live call as spending quota.
+
+    ## API tiers (from the wiki)
+      * **Free** (`безкоштовні`) — never metered (publishing APIs; out of scope).
+      * **Freemium** (`фріміум`) — billable but available on the free package;
+        this is search, listing info, and all dictionaries.
+      * **Paid** (`платний`) — only on paid packages; average-price and
+        VIN/plate params endpoints. Check "My permissions" in the cabinet.
+
+    ## Attribution requirement
+    The only mandatory usage condition is a visible, index-able hyperlink back to
+    the source project (AUTO.RIA / DIM.RIA / RIA.com) wherever data is shown.
+
+    ## Defensiveness
+    RIA returns undocumented/extra fields, nulls, and mixed UK/RU/EN labels.
+    All object schemas use `additionalProperties: true`; consumers must ignore
+    extras rather than reject. See the companion `OPEN-QUESTIONS.md` for every
+    ambiguity flagged during spec extraction.
+  contact:
+    name: AUTO.RIA API Platform support
+    email: info_developers@ria.com
+    url: https://developers.ria.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://developers.ria.com
+    description: Production (only documented host)
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: search
+    description: Listing search (returns IDs + counts). Maps to curated search tools.
+  - name: listing
+    description: Per-listing detail lookup by advert id.
+  - name: dictionaries
+    description: >-
+      Slowly-changing reference data for name⇄ID resolution. Cache heavily.
+  - name: statistics
+    description: AI average-price endpoints (point-in-time and over periods). Paid.
+  - name: other
+    description: VIN/plate/id parameter lookup and other endpoints. Paid.
+
+paths:
+
+  ##########################################################################
+  # SEARCH
+  ##########################################################################
+  /auto/search:
+    get:
+      operationId: searchUsedCars
+      tags: [search]
+      summary: Search used-car listings (V1)
+      description: |
+        Returns the IDs of adverts matching the supplied filters, plus a total
+        `count`. This is **search API V1** (the version actually backing this
+        endpoint); V2 is a field-renamed wrapper over V1, and V3 is a separate
+        param vocabulary (both documented in `OPEN-QUESTIONS.md`).
+
+        **Pagination:** max 100 ids per page. Use `page` (0-based) to paginate
+        and `countpage` (1–100) for page size. `result.search_result.count` is
+        the full match total.
+
+        **Useful flags (from the wiki):**
+          * `status_id=0` — exclude deleted adverts from the response.
+          * `searchType=4` — restrict to used cars only (excludes new-auto ids).
+            NOTE: the wiki's own example response shows `searchType: 6` in the
+            cleaned params — discrepancy flagged in OPEN-QUESTIONS.md.
+          * `generation_id[0][0]=<id>` — correct bracket form for generations.
+
+        **Serialization:** most multi-value filters use PHP-style bracket
+        indices, e.g. `marka_id[0]=79&marka_id[1]=84`, `type[0]=1`,
+        `state[0]=1&city[0]=0`. Marka/model/year/origin are positionally
+        correlated by index (slot 0 = first brand block, slot 1 = second, …).
+        Generation uses a 2-level index `generation_id[0][0]`; modification a
+        3-level index `modification_id[0][0][0]`. OpenAPI cannot fully express
+        these nested indices — see OPEN-QUESTIONS.md.
+
+        **Request → response remapping:** several request params are echoed in
+        the response under different names (`type`→`fuel_id`, `gearbox`→
+        `gear_id`, `brandOrigin`→`country`, `category_id`→`category_id`/typo
+        `categori_id`). Resolve IDs from request names; read results defensively.
+      parameters:
+        # --- core taxonomy (positionally indexed arrays unless noted) ---
+        - name: category_id
+          in: query
+          description: Transport type id (1 = passenger cars). See /auto/categories.
+          schema: { type: integer, example: 1 }
+        - name: marka_id
+          in: query
+          description: >-
+            Brand id(s). Bracket-indexed array, e.g. marka_id[0]=79.
+            Aliases accepted by the API- marka, mm_marka.
+          schema: { type: array, items: { type: integer } }
+        - name: model_id
+          in: query
+          description: >-
+            Model id(s), index-correlated with marka_id. 0 = all models of that
+            brand. Aliases- model, mm_model.
+          schema: { type: array, items: { type: integer } }
+        - name: generation_id
+          in: query
+          description: >-
+            Generation id, two-level bracket index- generation_id[0][0]=3607.
+            Aliases- generations. Nested indexing not fully expressible here.
+          schema: { type: array, items: { type: integer } }
+        - name: modification_id
+          in: query
+          description: >-
+            Modification id, three-level bracket index-
+            modification_id[0][0][0]. Aliases- modifications.
+          schema: { type: array, items: { type: integer } }
+        - name: s_yers
+          in: query
+          description: Year-from per brand block, e.g. s_yers[0]=2010. Alias- mm_s_yers.
+          schema: { type: array, items: { type: integer } }
+        - name: po_yers
+          in: query
+          description: Year-to per brand block, e.g. po_yers[0]=2017. Alias- mm_po_yers.
+          schema: { type: array, items: { type: integer } }
+        - name: bodystyle
+          in: query
+          description: >-
+            Body-style id(s), e.g. bodystyle[0]=3. Aliases- body_id, bodyStyleId.
+            See /auto/categories/{categoryId}/bodystyles.
+          schema: { type: array, items: { type: integer } }
+        - name: gearbox
+          in: query
+          description: >-
+            Gearbox id(s), e.g. gearbox[0]=1. Alias- gear_id (response name).
+            See /auto/categories/{categoryId}/gearboxes.
+          schema: { type: array, items: { type: integer } }
+        - name: drive_type
+          in: query
+          description: Drive type id. Alias- drive_id. Category-specific ids.
+          schema: { type: integer }
+        - name: axle
+          in: query
+          description: Axle id(s). Alias- axleId. See "other" param enum.
+          schema: { type: array, items: { type: integer } }
+        - name: wheel_formula
+          in: query
+          description: Wheel formula id(s). Alias- wheelFormulaId (supersedes drive+axle).
+          schema: { type: array, items: { type: integer } }
+        # --- engine / fuel / power ---
+        - name: type
+          in: query
+          description: >-
+            Fuel type id(s), e.g. type[0]=1. Alias- fuel_id (response name).
+            See /auto/type.
+          schema: { type: array, items: { type: integer } }
+        - name: fuelRateFrom
+          in: query
+          schema: { type: integer }
+          description: Fuel consumption from. Pair with fuelRatesType.
+        - name: fuelRateTo
+          in: query
+          schema: { type: integer }
+          description: Fuel consumption to.
+        - name: fuelRatesType
+          in: query
+          description: "Consumption cycle."
+          schema: { type: string, enum: [city, combine, route] }
+        - name: engineVolumeFrom
+          in: query
+          description: Engine volume from, litres (decimal as string, e.g. 1.4).
+          schema: { type: string, example: "1.4" }
+        - name: engineVolumeTo
+          in: query
+          description: Engine volume to, litres.
+          schema: { type: string, example: "3.2" }
+        - name: powerFrom
+          in: query
+          schema: { type: integer }
+          description: Engine power from (unit per power_name).
+        - name: powerTo
+          in: query
+          schema: { type: integer }
+          description: Engine power to.
+        - name: power_name
+          in: query
+          description: "Power unit."
+          schema: { type: integer, enum: [1, 2], default: 1 }
+        - name: accumulatorCapacityFrom
+          in: query
+          schema: { type: integer }
+          description: Battery capacity from (EVs).
+        - name: accumulatorCapacityTo
+          in: query
+          schema: { type: integer }
+        # --- dimensions / usage ---
+        - name: raceFrom
+          in: query
+          description: Mileage from, thousands of km. Aliases- raceInt, race.
+          schema: { type: integer }
+        - name: raceTo
+          in: query
+          description: Mileage to, thousands of km.
+          schema: { type: integer }
+        - name: doorsFrom
+          in: query
+          schema: { type: integer }
+          description: Doors from. Alias- door.
+        - name: doorsTo
+          in: query
+          schema: { type: integer }
+        - name: seatsFrom
+          in: query
+          schema: { type: integer }
+          description: Seats from. Alias- seats.
+        - name: seatsTo
+          in: query
+          schema: { type: integer }
+        - name: carryingFrom
+          in: query
+          schema: { type: integer }
+          description: Carrying capacity from. Alias- carrying.
+        - name: carryingTo
+          in: query
+          schema: { type: integer }
+        # --- price ---
+        - name: price_ot
+          in: query
+          description: Price from. (V1 search name; "other params" page name.)
+          schema: { type: integer }
+        - name: price_do
+          in: query
+          description: Price to.
+          schema: { type: integer }
+        - name: priceFrom
+          in: query
+          description: Price from (alt name- price, priceMain, priceFrom/priceTo).
+          schema: { type: integer }
+        - name: priceTo
+          in: query
+          schema: { type: integer }
+        - name: currency
+          in: query
+          description: "Price currency."
+          schema: { type: integer, enum: [1, 2, 3], example: 1 }
+        - name: vat
+          in: query
+          schema: { type: integer }
+          description: VAT flag.
+        - name: installment
+          in: query
+          schema: { type: integer }
+          description: Installment available.
+        - name: under_credit
+          in: query
+          description: Under credit (1 = only under-credit, 0 = others).
+          schema: { type: integer, enum: [0, 1] }
+        - name: for_zsu_cheaper
+          in: query
+          schema: { type: integer }
+          description: Cheaper for the Armed Forces of Ukraine.
+        # --- condition / color ---
+        - name: confiscated_car
+          in: query
+          description: Confiscated (1 = only confiscated, 0 = others).
+          schema: { type: integer, enum: [0, 1] }
+        - name: auto_options
+          in: query
+          description: >-
+            Option id(s). Bracket form- auto_options[477]=477. See
+            /auto/categories/{categoryId}/options.
+          schema: { type: array, items: { type: integer } }
+        - name: color_id
+          in: query
+          description: Color id(s). See /auto/colors.
+          schema: { type: array, items: { type: integer } }
+        - name: metallics
+          in: query
+          schema: { type: integer }
+          description: Metallic paint modifier.
+        - name: auto_repairs
+          in: query
+          description: "Not running / for parts."
+          schema: { type: integer, enum: [1, 2] }
+        - name: damage
+          in: query
+          description: "DTP (accident) history. 1 = not in accident, 2 = was in accident."
+          schema: { type: integer, enum: [1, 2] }
+        - name: technicalCondition
+          in: query
+          description: Technical condition id(s). 1..4 (see ListingInfo.technicalCondition).
+          schema: { type: array, items: { type: integer } }
+        - name: paintCondition
+          in: query
+          description: Paint/lacquer condition id(s). 1..3.
+          schema: { type: array, items: { type: integer } }
+        # --- geography ---
+        - name: state
+          in: query
+          description: >-
+            Region (oblast) id(s), e.g. state[0]=1. Aliases- state_id, m_state.
+            See /auto/states.
+          schema: { type: array, items: { type: integer } }
+        - name: city
+          in: query
+          description: >-
+            City id(s), index-correlated with state. 0 = all cities in that
+            region. Aliases- city_id, m_city. See /auto/states/{stateId}/cities.
+          schema: { type: array, items: { type: integer } }
+        - name: abroad
+          in: query
+          description: >-
+            Vehicle located outside Ukraine. VERIFIED- effectively BOOLEAN, not
+            the documented tri-state. 1 (truthy) => ONLY cars abroad (test count
+            dropped 19679→2, echoed abroad:true). 0 and 2 both => all cars
+            (echoed abroad:false). "Exclude abroad cars" is NOT achievable via
+            this param on /auto/search.
+          schema: { type: integer, enum: [0, 1, 2] }
+        - name: custom
+          in: query
+          description: "Customs status. 1 = not customs-cleared, 0 = customs-cleared."
+          schema: { type: integer, enum: [0, 1] }
+        - name: driven_from
+          in: query
+          schema: { type: integer }
+          description: Search cars imported from country X.
+        - name: was_not_driven_from
+          in: query
+          schema: { type: integer }
+          description: Exclude cars imported from country X.
+        - name: excludeUSA
+          in: query
+          description: "Duplicate of driven/was_not_driven_from. 1 = not from USA, 2 = from USA."
+          schema: { type: integer, enum: [1, 2] }
+        - name: country
+          in: query
+          description: >-
+            Manufactured-in country id(s) (brand origin). Aliases- mm_country.
+            Response echoes brandOrigin as country. See /auto/countries.
+          schema: { type: array, items: { type: integer } }
+        - name: country_exception
+          in: query
+          description: Exclude cars made in country X. Aliases- country_exeption, Mm_country_exeption.
+          schema: { type: array, items: { type: integer } }
+        - name: brandOrigin
+          in: query
+          description: >-
+            Brand-origin country id(s), e.g. brandOrigin[0]=276. Duplicate of
+            country; pair with originExclude. See /auto/countries.
+          schema: { type: array, items: { type: integer } }
+        - name: originExclude
+          in: query
+          schema: { type: integer }
+          description: Exclude flag for brandOrigin.
+        - name: matched_country
+          in: query
+          description: Imported-from (string form; uses /auto/countries ids).
+          schema: { type: string }
+        # --- VIN / plate / verification ---
+        - name: VIN
+          in: query
+          description: Search by VIN(s).
+          schema: { type: array, items: { type: string } }
+        - name: withVIN
+          in: query
+          schema: { type: integer }
+          description: Only with VIN.
+        - name: withoutVIN
+          in: query
+          schema: { type: integer }
+          description: Only without VIN.
+        - name: vin
+          in: query
+          description: "VIN inclusion flag (other-params page). 0 = exclude, 1 = include."
+          schema: { type: integer, enum: [0, 1] }
+        - name: verified
+          in: query
+          schema: { type: integer }
+          description: VIN-verified.
+        - name: plateNumber.length.gte
+          in: query
+          description: Plate-present flag (0 / non-0).
+          schema: { type: integer }
+        - name: with_autotest_tech_check
+          in: query
+          schema: { type: integer }
+        - name: with_autotest_vin_check
+          in: query
+          schema: { type: integer }
+        - name: with_autotest_vin_report
+          in: query
+          schema: { type: integer }
+        - name: autotest_vin_check_type
+          in: query
+          schema: { type: array, items: { type: integer } }
+        # --- seller ---
+        - name: sellerType
+          in: query
+          description: "Seller. 0 = all (default), 1 = private, 2 = company."
+          schema: { type: integer, enum: [0, 1, 2] }
+        - name: company_id
+          in: query
+          schema: { type: array, items: { type: integer } }
+          description: Seller company id(s).
+        - name: company_type
+          in: query
+          schema: { type: array, items: { type: integer } }
+          description: Seller company type id(s).
+        - name: user_id
+          in: query
+          description: Cars belonging to user X. (Filter; distinct from POST user_id.)
+          schema: { type: array, items: { type: integer } }
+        - name: person_id
+          in: query
+          schema: { type: integer }
+          description: Used with hide_black_list / black_user_id to exclude a user's cars.
+        # --- status / promotion ---
+        - name: status_id
+          in: query
+          description: Advert status id(s). status_id=0 excludes deleted. 22 = auction.
+          schema: { type: array, items: { type: integer } }
+        - name: auctions
+          in: query
+          description: Duplicate of status 22.
+          schema: { type: integer }
+        - name: withTop
+          in: query
+          schema: { type: integer }
+          description: level > 0.
+        - name: level
+          in: query
+          schema: { type: integer }
+          description: TOP level.
+        - name: freePublication
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: saledParam
+          in: query
+          description: "Sold-state filter. 0 = all, 1 = only sold, 2 = hide sold."
+          schema: { type: integer, enum: [0, 1, 2] }
+        # --- id lists ---
+        - name: auto_ids
+          in: query
+          schema: { type: array, items: { type: integer } }
+          description: Return adverts with these ids.
+        - name: auto_id_str
+          in: query
+          schema: { type: string }
+          description: Same as auto_ids but a single comma-separated string.
+        - name: exclude_auto_ids
+          in: query
+          schema: { type: array, items: { type: integer } }
+        - name: omni_id
+          in: query
+          description: Free text- VIN, plate, or advert id (auto-detected).
+          schema: { type: string }
+        # --- exchange ---
+        - name: with_exchange
+          in: query
+          schema: { type: integer }
+        - name: with_real_exchange
+          in: query
+          schema: { type: integer }
+          description: Exchange for real estate.
+        - name: exchangeTypeIds
+          in: query
+          schema: { type: array, items: { type: integer } }
+        # --- dates ---
+        - name: published_after
+          in: query
+          description: "ISO datetime, e.g. 2024-09-05T00:00:00Z."
+          schema: { type: string }
+        - name: published_before
+          in: query
+          schema: { type: string }
+        - name: created_after
+          in: query
+          schema: { type: string }
+        - name: created_before
+          in: query
+          schema: { type: string }
+        - name: start_date
+          in: query
+          schema: { type: string }
+          description: Published/republished from X.
+        - name: end_date
+          in: query
+          schema: { type: string }
+        - name: top
+          in: query
+          description: >-
+            Publication period preset. 0 = all time (default), 1 = hour,
+            2 = today, 3 = 3 days, 4 = week, 5 = month, 6 = 3 months, 8 = 3h,
+            9 = 6h, 10 = 2 days, 11 = 24h, 14 = 12h.
+          schema:
+            type: integer
+            enum: [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 14]
+        # --- media ---
+        - name: with_photo
+          in: query
+          description: "Only with photos. 0 = no, 1 = yes."
+          schema: { type: integer, enum: [0, 1] }
+        - name: with_video
+          in: query
+          schema: { type: integer, enum: [0, 1] }
+        - name: video_messages
+          in: query
+          schema: { type: integer }
+        # --- misc / classification ---
+        - name: class
+          in: query
+          schema: { type: integer }
+        - name: purpose
+          in: query
+          schema: { type: integer }
+        - name: searchType
+          in: query
+          description: >-
+            Search type. VERIFIED- default is 1 (not 6). searchType=4 only
+            marginally reduces count (test- 19679→19575) and flips
+            isCommonSearch to false; it does NOT bulk-remove new-auto and
+            OfferOfTheDay entries still appear in data[]. Filter on data[].type
+            == "UsedAuto" if you need strictly used cars.
+          schema: { type: integer, default: 1 }
+        # --- pagination / sort ---
+        - name: page
+          in: query
+          description: Page number, 0-based.
+          schema: { type: integer, default: 0, minimum: 0 }
+        - name: countpage
+          in: query
+          description: Page size, 1–100. VERIFIED default = 10 when omitted.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10, example: 50 }
+        - name: order_by
+          in: query
+          description: >-
+            Sort. VERIFIED- default 0 (relevance); 2 = price asc (confirmed-
+            first result $300), 3 = price desc, 7 = date newest, 8 = date
+            oldest, 12 = mileage desc, 13 = mileage asc, 5 = year newest,
+            6 = year oldest. The 8-value table is authoritative; the "other
+            params" page's 0/1/2 enum is a legacy/different param.
+          schema: { type: integer, enum: [0, 2, 3, 5, 6, 7, 8, 12, 13], default: 0 }
+        # --- equipment-detail filters (single-value option ids) ---
+        - name: headlights_id
+          in: query
+          schema: { type: integer }
+        - name: interior_materials_id
+          in: query
+          schema: { type: integer }
+        - name: interior_colors_id
+          in: query
+          schema: { type: integer }
+        - name: seat_adjustment_id
+          in: query
+          schema: { type: integer }
+        - name: seat_ventilation_id
+          in: query
+          schema: { type: integer }
+        - name: seats_heated_id
+          in: query
+          schema: { type: integer }
+        - name: memory_seat_module_id
+          in: query
+          schema: { type: integer }
+        - name: window_lifter_id
+          in: query
+          schema: { type: integer }
+        - name: conditioner_id
+          in: query
+          schema: { type: integer }
+        - name: power_steering_id
+          in: query
+          schema: { type: integer }
+        - name: steering_wheel_adjustment_id
+          in: query
+          schema: { type: integer }
+        - name: spare_wheel_id
+          in: query
+          schema: { type: integer }
+        - name: excludeMM
+          in: query
+          description: Exclude flag for brand-model-year-generation-modification set.
+          schema: { type: array, items: { type: integer } }
+      responses:
+        "200":
+          description: Search result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+              examples:
+                toyota_vw_passenger:
+                  $ref: "#/components/examples/SearchResponseExample"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  ##########################################################################
+  # LISTING INFO
+  ##########################################################################
+  /auto/info:
+    get:
+      operationId: getCarDetails
+      tags: [listing]
+      summary: Get listing details by advert id
+      description: |
+        Returns detailed information for a single advert. The phone number is
+        **never** returned (`userPhoneData.phone` is always masked). The VIN is
+        returned only if the seller has chosen to reveal it; otherwise the `VIN`
+        field is absent/empty while `infotechReport.vin`/`checkedVin.vin` may
+        carry a partially-masked value.
+      parameters:
+        - name: auto_id
+          in: query
+          required: true
+          description: Advert id.
+          schema: { type: integer, example: 36756951 }
+      responses:
+        "200":
+          description: Listing detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingInfo"
+              examples:
+                bmw_3_series:
+                  $ref: "#/components/examples/ListingInfoExample"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  ##########################################################################
+  # STATISTICS — AVERAGE PRICE (AI), point-in-time
+  ##########################################################################
+  /auto/ai-avarage-price/:
+    post:
+      operationId: getAveragePrice
+      tags: [statistics]
+      summary: AI average price (point-in-time)
+      description: |
+        **Paid.** Returns similar cars (`similarCars`) and their average price
+        (`statisticData`) either by car parameters or by a unique identifier
+        (`omniId` = VIN / plate / advert id). Identifier data is only available
+        if the vehicle was ever listed on the site.
+
+        Required body for the by-parameters mode: `categoryId`, `brandId`,
+        `modelId`, plus at least one more parameter. If `mileage` is omitted it
+        defaults to 50–500 (thousand km). The endpoint name's misspelling
+        ("avarage") is the real upstream path.
+      parameters:
+        - { $ref: "#/components/parameters/UserIdQuery" }
+        - { $ref: "#/components/parameters/ContentTypeJson" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AveragePriceRequest"
+            examples:
+              by_params:
+                $ref: "#/components/examples/AveragePriceByParamsRequest"
+              by_omni_id:
+                $ref: "#/components/examples/AveragePriceByOmniIdRequest"
+      responses:
+        "200":
+          description: Average price + similar cars.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AveragePriceResponse"
+              examples:
+                by_params:
+                  $ref: "#/components/examples/AveragePriceByParamsResponse"
+                by_omni_id:
+                  $ref: "#/components/examples/AveragePriceByOmniIdResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  ##########################################################################
+  # STATISTICS — AVERAGE PRICE OVER PERIODS (AI)
+  ##########################################################################
+  /auto/statistic-avarage-price/:
+    post:
+      operationId: getAveragePriceOverPeriods
+      tags: [statistics]
+      summary: AI average price over time periods
+      description: |
+        **Paid.** Returns a time series of average prices (`graphData`) plus the
+        selectable period presets (`periodSelectorData`), by `omniId` or by car
+        parameters. Same required-parameter and mileage-default rules as
+        /auto/ai-avarage-price/.
+      parameters:
+        - { $ref: "#/components/parameters/UserIdQuery" }
+        - { $ref: "#/components/parameters/ContentTypeJson" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AveragePriceRequest"
+            examples:
+              by_omni_id:
+                $ref: "#/components/examples/StatisticByOmniIdRequest"
+              by_params:
+                $ref: "#/components/examples/StatisticByParamsRequest"
+      responses:
+        "200":
+          description: Average-price time series.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticAveragePriceResponse"
+              examples:
+                by_omni_id:
+                  $ref: "#/components/examples/StatisticResponseExample"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  ##########################################################################
+  # OTHER — PARAMS BY VIN / PLATE / ID
+  ##########################################################################
+  /auto/params/by/vin-code/:
+    post:
+      operationId: getParamsByVin
+      tags: [other]
+      summary: Resolve car parameters by VIN / plate / advert id
+      description: |
+        **Paid.** Returns the decoded parameters of a car (as "chips") given a
+        unique identifier (`omniId` = VIN / plate / advert id). Only available if
+        the vehicle was listed on the site and a market value can be formed.
+        The `link.url` points at the equivalent auto.ria.com search.
+
+        VERIFIED- invalid/unresolvable omniId returns **HTTP 200** (not 4xx)
+        with NO `chipsData`, `searchType:"omniId"`, and a `noticeData` entry of
+        `noticeType:"error"` (e.g. "Помилка. Некоректні вхідні данні"). Detect
+        failures via noticeData[].noticeType=="error", not the HTTP status.
+      parameters:
+        - { $ref: "#/components/parameters/UserIdQuery" }
+        - { $ref: "#/components/parameters/ContentTypeJson" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OmniIdRequest"
+            examples:
+              by_omni_id:
+                $ref: "#/components/examples/VinParamsRequest"
+      responses:
+        "200":
+          description: Decoded parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VinParamsResponse"
+              examples:
+                skoda_octavia:
+                  $ref: "#/components/examples/VinParamsResponseExample"
+                invalid_omni_id:
+                  $ref: "#/components/examples/VinParamsErrorExample"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  ##########################################################################
+  # DICTIONARIES
+  ##########################################################################
+  /auto/categories:
+    get:
+      operationId: listCategories
+      tags: [dictionaries]
+      summary: Transport types
+      description: All transport types (categories) with ids. Cache 7–30 days.
+      responses:
+        "200":
+          description: Category list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                categories:
+                  $ref: "#/components/examples/CategoriesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/marks:
+    get:
+      operationId: listMarks
+      tags: [dictionaries]
+      summary: Brands (marks) for a transport type
+      description: All brands for a category. Cache 7–30 days.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Brand list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                marks:
+                  $ref: "#/components/examples/MarksExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/marks/{markId}/models:
+    get:
+      operationId: listModels
+      tags: [dictionaries]
+      summary: Models for a transport type + brand
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+        - { $ref: "#/components/parameters/MarkIdPath" }
+      responses:
+        "200":
+          description: Model list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                models:
+                  $ref: "#/components/examples/ModelsExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/marks/{markId}/models/_group:
+    get:
+      operationId: listModelsGrouped
+      tags: [dictionaries]
+      summary: Models for a transport type + brand, grouped
+      description: >-
+        VERIFIED- a HETEROGENEOUS array. Each top-level item is EITHER a bare
+        NameValue (ungrouped model) OR an array of NameValue (a group; e.g. the
+        "X" family- X1, X3, X5...). It is NOT a uniform array-of-arrays. Parse
+        each element with a type check.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+        - { $ref: "#/components/parameters/MarkIdPath" }
+      responses:
+        "200":
+          description: Grouped model list (mixed objects and arrays).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - { $ref: "#/components/schemas/NameValue" }
+                    - type: array
+                      items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                bmw:
+                  $ref: "#/components/examples/ModelsGroupExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/models:
+    get:
+      operationId: listAllModels
+      tags: [dictionaries]
+      summary: All models (across all brands/categories)
+      responses:
+        "200":
+          description: All models.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /generations/by/models/{modelID}/generations:
+    get:
+      operationId: listGenerations
+      tags: [dictionaries]
+      summary: Generations for a model
+      description: >-
+        NOTE- this dictionary lives at the host root, not under /auto. Returns a
+        nested structure (model → generations[]). The example shows a single
+        model wrapper object in an array.
+      parameters:
+        - name: modelID
+          in: path
+          required: true
+          description: Model id.
+          schema: { type: integer, example: 1653 }
+      responses:
+        "200":
+          description: Generations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ModelGenerations" }
+              examples:
+                caravelle:
+                  $ref: "#/components/examples/GenerationsExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /modifications/by/generation/{generationID}/modifications:
+    get:
+      operationId: listModifications
+      tags: [dictionaries]
+      summary: Modifications for a generation
+      description: NOTE- host-root path (not under /auto).
+      parameters:
+        - { $ref: "#/components/parameters/GenerationIdPath" }
+      responses:
+        "200":
+          description: Modifications.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                t6:
+                  $ref: "#/components/examples/ModificationsExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /modifications/by/generation/{generationID}/body/{body_id}/modifications:
+    get:
+      operationId: listModificationsByBody
+      tags: [dictionaries]
+      summary: Modifications for a generation + body type
+      description: NOTE- host-root path (not under /auto).
+      parameters:
+        - { $ref: "#/components/parameters/GenerationIdPath" }
+        - { $ref: "#/components/parameters/BodyIdPath" }
+      responses:
+        "200":
+          description: Modifications.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto_ria/equips_by_modifications:
+    get:
+      operationId: listEquipmentByModification
+      tags: [dictionaries]
+      summary: Equipment trims for a modification
+      parameters:
+        - name: modificationId
+          in: query
+          required: true
+          description: Modification id.
+          schema: { type: integer, example: 115538 }
+      responses:
+        "200":
+          description: Equipment trims.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Equip" }
+              examples:
+                trims:
+                  $ref: "#/components/examples/EquipsExample"
+        "400":
+          description: Missing/invalid modification id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageError" }
+              examples:
+                missing:
+                  value: { message: "Modification ID is required" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/bodystyles:
+    get:
+      operationId: listBodystyles
+      tags: [dictionaries]
+      summary: Body styles for a transport type
+      description: parentId != 0 means the body style belongs to a group.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Body styles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValueParent" }
+              examples:
+                passenger:
+                  $ref: "#/components/examples/BodystylesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/bodystyles/_group:
+    get:
+      operationId: listBodystylesGrouped
+      tags: [dictionaries]
+      summary: Body styles for a transport type, grouped
+      description: Array of groups; first item in a group (parentId 0) names it.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Grouped body styles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: array
+                  items: { $ref: "#/components/schemas/NameValueParent" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/bodystyles:
+    get:
+      operationId: listAllBodystyles
+      tags: [dictionaries]
+      summary: All body styles
+      responses:
+        "200":
+          description: All body styles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValueParent" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /bodies/by/generation/{generationID}/bodies:
+    get:
+      operationId: listBodiesByGeneration
+      tags: [dictionaries]
+      summary: Body types available for a generation
+      description: NOTE- host-root path (not under /auto).
+      parameters:
+        - { $ref: "#/components/parameters/GenerationIdPath" }
+      responses:
+        "200":
+          description: Body types.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/states:
+    get:
+      operationId: listStates
+      tags: [dictionaries]
+      summary: Regions (oblasts)
+      responses:
+        "200":
+          description: Regions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                states:
+                  $ref: "#/components/examples/StatesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/states/{stateId}/cities:
+    get:
+      operationId: listCities
+      tags: [dictionaries]
+      summary: Cities for a region
+      parameters:
+        - name: stateId
+          in: path
+          required: true
+          description: Region (oblast) id.
+          schema: { type: integer, example: 1 }
+      responses:
+        "200":
+          description: Cities.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                vinnytsia:
+                  $ref: "#/components/examples/CitiesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/driverTypes:
+    get:
+      operationId: listDriverTypes
+      tags: [dictionaries]
+      summary: Drive types for a transport type
+      description: >-
+        Drive-type ids are category-specific. VERIFIED for cars (category 1):
+        1 = Повний (full/AWD), 2 = Передній (front), 3 = Задній (rear). The moto
+        set (category 2) is different- 4 Кардан, 5 Ремінь, 6 Ланцюг.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Drive types.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                cars:
+                  $ref: "#/components/examples/DriverTypesCarsExample"
+                moto:
+                  $ref: "#/components/examples/DriverTypesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/type:
+    get:
+      operationId: listFuelTypes
+      tags: [dictionaries]
+      summary: Fuel types
+      description: >-
+        Global fuel-type list. The wiki shows both a current set and an older
+        set with different ids/labels; reconcile against a live call
+        (see OPEN-QUESTIONS.md).
+      responses:
+        "200":
+          description: Fuel types.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                fuel_current:
+                  $ref: "#/components/examples/FuelTypesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/gearboxes:
+    get:
+      operationId: listGearboxes
+      tags: [dictionaries]
+      summary: Gearboxes for a transport type
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Gearboxes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                gearboxes:
+                  $ref: "#/components/examples/GearboxesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/categories/{categoryId}/options:
+    get:
+      operationId: listOptions
+      tags: [dictionaries]
+      summary: Options (equipment) for a transport type — search vocabulary
+      description: >-
+        Flat option list used with the search `auto_options` filter. For the
+        publishing-oriented grouped structure, use /used_auto/get_options.
+      parameters:
+        - { $ref: "#/components/parameters/CategoryIdPath" }
+      responses:
+        "200":
+          description: Options.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                options:
+                  $ref: "#/components/examples/OptionsExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /used_auto/get_options/{categoryID}/optionsV2:
+    get:
+      operationId: listOptionsV2
+      tags: [dictionaries]
+      summary: Options V2 (grouped, for publishing)
+      description: >-
+        Grouped options keyed by group id, split into `binary` (checkbox) and
+        `selectable` (value-bearing) options, with UK/RU translations. Intended
+        for advert publishing; included for completeness. Structure is loose —
+        modeled as free-form objects.
+      parameters:
+        - name: categoryID
+          in: path
+          required: true
+          description: Transport type id.
+          schema: { type: integer, example: 1 }
+      responses:
+        "200":
+          description: Grouped options.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionsV2Response"
+              examples:
+                passenger:
+                  $ref: "#/components/examples/OptionsV2Example"
+        "400":
+          description: Invalid categoryId.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageError" }
+              examples:
+                bad:
+                  value: { message: "Invalid categoryId: <id>" }
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageError" }
+              examples:
+                err:
+                  value: { message: "Internal server error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/colors:
+    get:
+      operationId: listColors
+      tags: [dictionaries]
+      summary: Colors
+      responses:
+        "200":
+          description: Colors.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                colors:
+                  $ref: "#/components/examples/ColorsExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /auto/countries:
+    get:
+      operationId: listCountries
+      tags: [dictionaries]
+      summary: Manufacturer / origin countries
+      description: >-
+        VERIFIED- most ids are ISO 3166-1 numeric (276 DE, 408 KR, 840 US,
+        392 JP, 804 UA, 826 "Англія"/UK), BUT a custom 900–913 block overrides
+        ISO for some (900 Грузія, 901 Ірландія, 902 ОАЕ, 903 Ісландія,
+        904 Австралія, 905 Алжир, 906 Греція, 907 Єгипет, 908 Ізраїль,
+        909 Монако, 910 Таджикистан, 911 Тайвань, 912 Таїланд, 913 Хорватія).
+        Do NOT derive ids from a local ISO table — always resolve via this dict.
+      responses:
+        "200":
+          description: Countries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NameValue" }
+              examples:
+                countries:
+                  $ref: "#/components/examples/CountriesExample"
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+components:
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: query
+      name: api_key
+      description: Personal API key. Required on every request. Never log it.
+
+  parameters:
+    UserIdQuery:
+      name: user_id
+      in: query
+      required: true
+      description: User id (required by paid POST endpoints, alongside api_key).
+      schema: { type: integer, example: 12246211 }
+    ContentTypeJson:
+      name: Content-Type
+      in: header
+      required: true
+      description: Must be application/json for POST endpoints.
+      schema: { type: string, enum: ["application/json"] }
+    CategoryIdPath:
+      name: categoryId
+      in: path
+      required: true
+      description: Transport type id. See /auto/categories.
+      schema: { type: integer, example: 1 }
+    MarkIdPath:
+      name: markId
+      in: path
+      required: true
+      description: Brand id. See /auto/categories/{categoryId}/marks.
+      schema: { type: integer, example: 9 }
+    GenerationIdPath:
+      name: generationID
+      in: path
+      required: true
+      description: Generation id. See /generations/by/models/{modelID}/generations.
+      schema: { type: integer, example: 17 }
+    BodyIdPath:
+      name: body_id
+      in: path
+      required: true
+      description: Body-style id. See /auto/categories/{categoryId}/bodystyles.
+      schema: { type: integer, example: 3 }
+
+  responses:
+    BadRequest:
+      description: >-
+        Bad request. Common- HTTPS_REQUIRED (400) when not using HTTPS, or an
+        endpoint-specific { message } payload.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - { $ref: "#/components/schemas/ApiError" }
+              - { $ref: "#/components/schemas/MessageError" }
+          examples:
+            https_required:
+              value: { error: { code: "HTTPS_REQUIRED", message: "Requests to this API must be made over HTTPS." } }
+    Forbidden:
+      description: >-
+        API key problem (403)- API_KEY_MISSING, API_KEY_INVALID,
+        API_KEY_DISABLED, API_KEY_UNAUTHORIZED, API_KEY_UNVERIFIED.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+          examples:
+            missing:
+              value: { error: { code: "API_KEY_MISSING", message: "No api_key was supplied. Get one at https://developers.ria.com" } }
+            invalid:
+              value: { error: { code: "API_KEY_INVALID", message: "An invalid api_key was supplied. Get one at https://developers.ria.com" } }
+    NotFound:
+      description: NOT_FOUND (404) — no API at this URL, or unknown id.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+          examples:
+            not_found:
+              value: { error: { code: "NOT_FOUND", message: "Could not find an API at this URL." } }
+    TooManyRequests:
+      description: >-
+        OVER_RATE_LIMIT (429). Hourly or monthly quota exceeded; key temporarily
+        blocked. VERIFIED- success responses expose NO X-RateLimit-*/Retry-After
+        headers, so the client must track quota itself (cannot read remaining
+        from headers). The 429 body shape is assumed to match ApiError.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+          examples:
+            over_limit:
+              value: { error: { code: "OVER_RATE_LIMIT", message: "Rate limit exceeded for this api_key." } }
+
+  schemas:
+
+    NameValue:
+      type: object
+      additionalProperties: true
+      description: Standard dictionary entry- human label + numeric id.
+      properties:
+        name: { type: string, description: Human-readable label (UK/RU/EN). }
+        value: { type: integer, description: Numeric id used in search filters. }
+
+    NameValueParent:
+      type: object
+      additionalProperties: true
+      description: Dictionary entry with grouping (body styles).
+      properties:
+        name: { type: string }
+        value: { type: integer }
+        parentId:
+          type: integer
+          description: 0 = top-level; non-0 = id of the parent/group body style.
+
+    ModelGenerations:
+      type: object
+      additionalProperties: true
+      description: A model wrapper carrying its generations.
+      properties:
+        name: { type: string, description: Model name. }
+        id: { type: integer, description: Model id. }
+        generations:
+          type: array
+          items: { $ref: "#/components/schemas/Generation" }
+
+    Generation:
+      type: object
+      additionalProperties: true
+      properties:
+        generationId: { type: integer }
+        name: { type: string }
+        yearFrom: { type: integer }
+        yearTo: { type: integer }
+        modelId: { type: integer }
+        eng: { type: string, description: Slug (latin). }
+
+    Equip:
+      type: object
+      additionalProperties: true
+      properties:
+        equipId: { type: integer, description: Equipment/trim id. }
+        baseId: { type: integer, description: Modification id. }
+        year: { type: string }
+        name: { type: string }
+
+    OptionsV2Response:
+      type: object
+      additionalProperties: true
+      description: >-
+        Grouped options for publishing. Keys are group ids mapping to a group
+        object (or null). Modeled loosely; read defensively.
+      properties:
+        binary:
+          type: object
+          additionalProperties: true
+          description: Checkbox options, keyed by group id.
+        selectable:
+          type: object
+          additionalProperties: true
+          description: Value-bearing options, keyed by group id.
+
+    # ---- Search ----
+    SearchResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        additional_params:
+          type: object
+          additionalProperties: true
+          properties:
+            lang_id:
+              description: >-
+                VERIFIED mixed type- string ("4") on live, integer (2) in older
+                docs. Coerce to int when consuming.
+              oneOf: [{ type: string }, { type: integer }]
+            page: { type: integer }
+            view_type_id: { type: integer }
+            target: { type: string }
+            section: { type: string }
+            catalog_name: { type: string }
+            elastica: { type: boolean }
+            nodejs: { type: boolean }
+            searchByTypeAction: { type: boolean }
+        result:
+          type: object
+          additionalProperties: true
+          properties:
+            search_result:
+              type: object
+              additionalProperties: true
+              description: Primary result block.
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                  description: Matching advert ids (as strings).
+                count:
+                  type: integer
+                  description: Total adverts matching the filters.
+                last_id: { type: integer }
+            search_result_common:
+              type: object
+              additionalProperties: true
+              properties:
+                count: { type: integer }
+                last_id: { type: integer }
+                data:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      id: { type: string }
+                      type:
+                        type: string
+                        description: e.g. UsedAuto, OfferOfTheDay.
+            active_marka:
+              type: ["object", "null"]
+              additionalProperties: true
+            active_model: { type: ["object", "null"] }
+            active_state: { type: ["object", "null"] }
+            active_city: { type: ["object", "null"] }
+            isCommonSearch: { type: boolean }
+            additional:
+              type: object
+              additionalProperties: true
+              description: >-
+                VERIFIED shape- { query_string, search_params:{all,cleaned},
+                user_auto_positions }. NOTE query_string lives HERE (inside
+                additional), not at result top level. search_params echoes
+                resolved filters with request→response renames (type→fuel_id,
+                gearbox→gear_id, brandOrigin→country) and the API auto-appends
+                lang_id/langId to query_string.
+              properties:
+                query_string:
+                  type: string
+                  description: The reconstructed query string (with lang_id/langId appended).
+                search_params:
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    all: { type: object, additionalProperties: true }
+                    cleaned: { type: object, additionalProperties: true }
+                user_auto_positions:
+                  type: array
+                  items: {}
+
+    # ---- Listing info ----
+    ListingInfo:
+      type: object
+      additionalProperties: true
+      description: >-
+        Full advert detail. Only the most-used fields are typed; the live
+        payload carries many more (additionalProperties true). Phone is always
+        masked; VIN present only if revealed by the seller.
+      properties:
+        markId: { type: integer }
+        markName: { type: string }
+        markNameEng: { type: string }
+        modelId: { type: integer }
+        modelName: { type: string }
+        modelNameEng: { type: string }
+        title: { type: string }
+        USD: { type: integer }
+        EUR: { type: integer }
+        UAH: { type: integer }
+        prices:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        VIN: { type: string }
+        plateNumber: { type: string }
+        linkToView: { type: string, description: Relative auto.ria listing URL. }
+        addDate: { type: string }
+        updateDate: { type: string }
+        expireDate: { type: string }
+        soldDate: { type: string }
+        auctionPossible: { type: boolean }
+        exchangePossible: { type: boolean }
+        realtyExchange: { type: boolean }
+        userId: { type: integer }
+        userPhoneData:
+          type: object
+          additionalProperties: true
+          description: Always masked (no real phone returned).
+          properties:
+            phone: { type: string }
+            phoneId: { type: string }
+        photoData:
+          type: object
+          additionalProperties: true
+          properties:
+            all:
+              type: array
+              items: { type: integer }
+            count: { type: integer }
+            seoLinkM: { type: string }
+        stateData:
+          type: object
+          additionalProperties: true
+          properties:
+            cityId: { type: integer }
+            stateId: { type: integer }
+            name: { type: string }
+            regionName: { type: string }
+            regionNameEng: { type: string }
+        dealer:
+          type: object
+          additionalProperties: true
+        color:
+          type: object
+          additionalProperties: true
+          properties:
+            eng: { type: string }
+            hex: { type: string }
+            name: { type: string }
+        technicalCondition:
+          type: object
+          additionalProperties: true
+          description: >-
+            id- 1 fully undamaged, 2 professionally repaired, 3 unrepaired
+            damage, 4 not running / for parts.
+          properties:
+            id: { type: integer }
+            title: { type: string }
+            annotation: { type: string }
+            langId: { type: integer }
+        autoData:
+          type: object
+          additionalProperties: true
+          properties:
+            autoId: { type: integer }
+            categoryId: { type: integer }
+            year: { type: integer }
+            race: { type: string }
+            raceInt: { type: integer }
+            fuelId: { type: integer }
+            fuelName: { type: string }
+            gearBoxId: { type: integer }
+            gearboxName: { type: string }
+            driveId: { type: integer }
+            driveName: { type: string }
+            bodyId: { type: integer }
+            generationId: { type: integer }
+            generationName: { type: string }
+            modificationId: { type: integer }
+            modificationName: { type: string }
+            equipmentId: { type: integer }
+            equipmentName: { type: string }
+            statusId: { type: integer }
+            isSold: { type: boolean }
+            mainCurrency: { type: string }
+            description: { type: string }
+        levelData:
+          type: object
+          additionalProperties: true
+        checkedVin:
+          type: object
+          additionalProperties: true
+
+    # ---- Average price (shared request) ----
+    AveragePriceRequest:
+      type: object
+      additionalProperties: true
+      required: [langId, period, params]
+      description: >-
+        Body for the average-price endpoints. `params` is either a car-parameter
+        object (CarParams) or a single-key omniId object.
+      properties:
+        langId:
+          type: integer
+          description: Language id (4 = UK in examples).
+        period:
+          type: integer
+          description: >-
+            Period in days. VERIFIED allowed values (from
+            periodSelectorData.elements)- 30, 90, 180, 365. Other values may be
+            clamped/rejected.
+          enum: [30, 90, 180, 365]
+        params:
+          oneOf:
+            - { $ref: "#/components/schemas/CarParams" }
+            - { $ref: "#/components/schemas/OmniIdParams" }
+
+    OmniIdRequest:
+      type: object
+      additionalProperties: true
+      required: [langId, period, params]
+      properties:
+        langId: { type: integer }
+        period: { type: integer }
+        params: { $ref: "#/components/schemas/OmniIdParams" }
+
+    OmniIdParams:
+      type: object
+      additionalProperties: true
+      required: [omniId]
+      properties:
+        omniId:
+          type: string
+          description: VIN, state plate number, or advert id (auto-detected).
+
+    Range:
+      type: object
+      additionalProperties: true
+      description: gte/lte string range.
+      properties:
+        gte: { type: string }
+        lte: { type: string }
+
+    CarParams:
+      type: object
+      additionalProperties: true
+      description: >-
+        Car parameters for average-price by-params mode. Required- categoryId,
+        brandId, modelId + at least one more. All ids are strings here (unlike
+        the search endpoint). Note distinct casing- gearBoxId, bodyId, etc.
+      required: [categoryId, brandId, modelId]
+      properties:
+        categoryId: { type: string }
+        stateId: { type: string }
+        brandId: { type: string, description: Brand id (= marka_id elsewhere). }
+        modelId: { type: string }
+        generationId: { type: string }
+        modificationId: { type: string }
+        bodyId: { type: string }
+        year: { $ref: "#/components/schemas/Range" }
+        fuelId: { type: string }
+        mileage:
+          allOf:
+            - { $ref: "#/components/schemas/Range" }
+          description: Thousand km. Defaults to 50–500 if omitted.
+        engineVolume: { $ref: "#/components/schemas/Range" }
+        gearBoxId: { type: string }
+        driveId: { type: string }
+        colorId: { type: string }
+        power: { type: number, description: Engine power (h.p.). }
+        axle: { type: number }
+        carrying: { type: number }
+        seats: { type: number }
+        door: { type: number }
+        metallic: { type: number, description: "1 = metallic." }
+        onRepairParts: { type: number, description: "1 = fully for parts." }
+        city_id: { type: number }
+        damage: { type: number, description: "1 = was in accident, 0 = not." }
+        custom: { type: number, description: "1 = not customs-cleared, 0 = cleared." }
+        is_exchange: { type: number, description: "1 = exchange possible, 0 = no." }
+        VIN: { type: string }
+        confiscated_car: { type: number, description: "1 = was confiscated, 0 = no." }
+        abroad: { type: number, description: "1 = abroad, 0 = in Ukraine." }
+        plateNumber: { type: string }
+        paintConditionId:
+          type: number
+          description: "1 = like new, 2 = professionally corrected, 3 = uncorrected."
+        technicalConditionId:
+          type: number
+          description: "1 undamaged, 2 prof. repaired, 3 unrepaired, 4 not running."
+        headlightId:
+          type: number
+          description: "1 xenon/bi-xenon, 2 laser, 3 LED, 4 matrix."
+        interiorMaterialId:
+          type: number
+          description: "1 fabric, 2 leather, 3 velour, 4 combined, 5 eco-leather, 6 alcantara."
+        interiorColorId: { type: number, description: "1 light, 2 dark, 3 brown." }
+        seatAdjustmentId: { type: number }
+        seatVentilationId: { type: number }
+        seatHeatedId: { type: number }
+        memorySeatModuleId: { type: number }
+        windowLifterId: { type: number }
+        conditionerTypeId: { type: number }
+        powerSteeringId: { type: number, description: "1 hydro, 2 electric." }
+        steeringWheelAdjustmentId: { type: number }
+        spareWheelId: { type: number, description: "1 full-size, 2 compact." }
+        installment: { type: number, description: "1 = installment possible, 0 = no." }
+
+    AveragePriceResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        similarCars:
+          type: array
+          items: { $ref: "#/components/schemas/SimilarCar" }
+        statisticData:
+          type: array
+          items: { $ref: "#/components/schemas/AveragePriceStat" }
+
+    SimilarCar:
+      type: object
+      additionalProperties: true
+      properties:
+        VIN: { type: string }
+        id: { type: integer, description: Advert id. }
+        title: { type: string }
+        year: { type: integer }
+        race: { type: string }
+        raceInt: { type: integer }
+        level: { type: integer }
+        uri: { type: string }
+        mainPhoto: { type: string }
+        plateNumber: { type: string }
+        verifiedVIN:
+          description: Mixed type in the wild (boolean or 0/1).
+          oneOf:
+            - { type: boolean }
+            - { type: integer }
+        brand:
+          type: object
+          additionalProperties: true
+          properties:
+            eng: { type: string }
+            id: { type: integer }
+        model:
+          type: object
+          additionalProperties: true
+          properties:
+            eng: { type: string }
+            id: { type: integer }
+        fuel:
+          type: object
+          additionalProperties: true
+          properties:
+            name: { type: string }
+        gearbox:
+          type: object
+          additionalProperties: true
+          properties:
+            name: { type: string }
+        location:
+          type: object
+          additionalProperties: true
+          properties:
+            city:
+              type: object
+              additionalProperties: true
+              properties:
+                name: { type: string }
+        price:
+          type: object
+          additionalProperties: true
+          description: price.all.{UAH,USD}.{currency:{abbreviated,sign},value}.
+          properties:
+            all:
+              type: object
+              additionalProperties: true
+
+    AveragePriceStat:
+      type: object
+      additionalProperties: true
+      properties:
+        id: { type: string, description: e.g. avgPriceBlock. }
+        name: { type: string }
+        type: { type: string, description: e.g. avgPrice. }
+        price:
+          type: object
+          additionalProperties: true
+          properties:
+            UAH: { type: integer }
+            USD: { type: integer }
+
+    StatisticAveragePriceResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        graphData:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              date:
+                type: string
+                description: 'VERIFIED format "MM.YY" (e.g. "06.25"), NOT ISO.'
+              advCnt:
+                type: integer
+                description: VERIFIED- advert count for that month (undocumented).
+              price:
+                type: object
+                additionalProperties: true
+                properties:
+                  UAH: { type: integer }
+                  USD: { type: integer }
+        noticeData:
+          type: array
+          description: VERIFIED present- status notice(s); noticeType success|error.
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              linkHref: { type: string }
+              linkText: { type: string }
+              noticeString: { type: string }
+              noticeType: { type: string }
+        periodSelectorData:
+          type: object
+          additionalProperties: true
+          properties:
+            fieldId: { type: string }
+            elements:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+                properties:
+                  name: { type: string }
+                  value: { type: integer, description: Days in the period. }
+
+    # ---- VIN params ----
+    VinParamsResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        chipsData:
+          type: object
+          additionalProperties: true
+          properties:
+            chips:
+              type: array
+              items: { $ref: "#/components/schemas/VinChip" }
+            link:
+              type: object
+              additionalProperties: true
+              properties:
+                text: { type: string }
+                url: { type: string }
+        noticeData:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              linkHref: { type: string }
+              linkText: { type: string }
+              noticeString: { type: string }
+              noticeType: { type: string }
+        searchType:
+          type: string
+          description: >-
+            VERIFIED- "VIN" on success; "omniId" on an invalid/unresolved
+            identifier (paired with an error noticeData entry and no chipsData).
+
+    VinChip:
+      type: object
+      additionalProperties: true
+      description: >-
+        A decoded attribute. `entity` names the dimension (categoryId, brandId,
+        modelId, bodyId, fuelId, engineVolume, gearBoxId, driveId, colorId,
+        stateId, mileage, modificationId, generationId, year).
+      properties:
+        entity: { type: string }
+        id: { type: string }
+        name: { type: string }
+
+    # ---- Errors ----
+    ApiError:
+      type: object
+      additionalProperties: true
+      description: >-
+        Standard RIA error envelope. VERIFIED 2026-06-06- nested object
+        { error: { code, message } } (NOT a flat string). Codes confirmed for
+        403; the other codes are from the docs.
+      properties:
+        error:
+          type: object
+          additionalProperties: true
+          properties:
+            code:
+              type: string
+              enum:
+                - API_KEY_MISSING
+                - API_KEY_INVALID
+                - API_KEY_DISABLED
+                - API_KEY_UNAUTHORIZED
+                - API_KEY_UNVERIFIED
+                - HTTPS_REQUIRED
+                - OVER_RATE_LIMIT
+                - NOT_FOUND
+            message:
+              type: string
+
+    MessageError:
+      type: object
+      additionalProperties: true
+      description: Endpoint-specific error envelope (equips, optionsV2).
+      properties:
+        message: { type: string }
+
+  examples:
+
+    CategoriesExample:
+      summary: GET /auto/categories
+      value:
+        - { name: "Легкові", value: 1 }
+        - { name: "Мото", value: 2 }
+        - { name: "Водний транспорт", value: 3 }
+        - { name: "Спецтехніка", value: 4 }
+        - { name: "Причепи", value: 5 }
+        - { name: "Вантажівки", value: 6 }
+        - { name: "Автобуси", value: 7 }
+        - { name: "Автобудинки", value: 8 }
+        - { name: "Повітряний транспорт", value: 9 }
+        - { name: "Сільгосптехніка", value: 10 }
+
+    MarksExample:
+      summary: GET /auto/categories/1/marks (truncated)
+      value:
+        - { name: "Acura", value: 98 }
+        - { name: "Alfa Romeo", value: 3 }
+        - { name: "Aston Martin", value: 5 }
+        - { name: "Audi", value: 6 }
+        - { name: "BMW", value: 9 }
+
+    ModelsExample:
+      summary: GET /auto/categories/2/marks/9/models (truncated)
+      value:
+        - { name: "Adventure", value: 25290 }
+        - { name: "C", value: 25291 }
+        - { name: "GS", value: 25295 }
+        - { name: "R", value: 25300 }
+
+    ModelsGroupExample:
+      summary: GET /auto/categories/1/marks/9/models/_group (LIVE, truncated — heterogeneous)
+      value:
+        - { name: "1 Series", value: 2161 }
+        - { name: "1500", value: 63521 }
+        - - { name: "1502", value: 48926 }
+          - { name: "1602", value: 47380 }
+          - { name: "2002", value: 47386 }
+        - { name: "3 Series", value: 3219 }
+        - - { name: "X1", value: 3597 }
+          - { name: "X3", value: 1866 }
+          - { name: "X5", value: 96 }
+
+    GenerationsExample:
+      summary: GET /generations/by/models/1653/generations (truncated)
+      value:
+        - name: "Caravelle"
+          id: 1653
+          generations:
+            - { generationId: 16, name: "III покоління (FL)/T5", yearFrom: 2009, yearTo: 2015, modelId: 1653, eng: "t5-fl" }
+            - { generationId: 17, name: "IV покоління/T6", yearFrom: 2015, yearTo: 2019, modelId: 1653, eng: "t6" }
+
+    ModificationsExample:
+      summary: GET /modifications/by/generation/17/modifications (truncated)
+      value:
+        - { name: "2.0 BiTDI DSG (180 к.с.)", value: 115538 }
+        - { name: "2.0 BiTDI DSG (180 к.с.) 4Motion", value: 115539 }
+        - { name: "2.0 TDI DSG (102 к.с.)", value: 121490 }
+
+    EquipsExample:
+      summary: GET /auto_ria/equips_by_modifications?modificationId=115538
+      value:
+        - { equipId: 73508, baseId: 115538, year: "2017", name: "Comfortline" }
+        - { equipId: 73509, baseId: 115538, year: "2017", name: "Executive" }
+        - { equipId: 73510, baseId: 115538, year: "2017", name: "Trendline" }
+
+    BodystylesExample:
+      summary: GET /auto/categories/1/bodystyles
+      value:
+        - { name: "Седан", value: 3, parentId: 0 }
+        - { name: "Позашляховик / Кросовер", value: 5, parentId: 0 }
+        - { name: "Мінівен", value: 8, parentId: 0 }
+        - { name: "Хетчбек", value: 4, parentId: 0 }
+        - { name: "Унiверсал", value: 2, parentId: 0 }
+        - { name: "Купе", value: 6, parentId: 0 }
+        - { name: "Кабріолет", value: 7, parentId: 0 }
+        - { name: "Пікап", value: 9, parentId: 0 }
+        - { name: "Ліфтбек", value: 307, parentId: 0 }
+        - { name: "Лімузин", value: 252, parentId: 0 }
+        - { name: "Родстер", value: 315, parentId: 0 }
+
+    StatesExample:
+      summary: GET /auto/states (truncated)
+      value:
+        - { name: "Київська", value: 10 }
+        - { name: "Вінницька", value: 1 }
+        - { name: "Львівська", value: 5 }
+        - { name: "Одеська", value: 12 }
+        - { name: "Харківська", value: 7 }
+
+    CitiesExample:
+      summary: GET /auto/states/1/cities (truncated)
+      value:
+        - { name: "Вінниця", value: 1 }
+        - { name: "Жмеринка", value: 27 }
+        - { name: "Козятин", value: 30 }
+
+    DriverTypesCarsExample:
+      summary: GET /auto/categories/1/driverTypes (LIVE 2026-06, verified)
+      value:
+        - { name: "Повний", value: 1 }
+        - { name: "Передній", value: 2 }
+        - { name: "Задній", value: 3 }
+
+    DriverTypesExample:
+      summary: GET /auto/categories/2/driverTypes (moto)
+      value:
+        - { name: "Кардан", value: 4 }
+        - { name: "Ремінь", value: 5 }
+        - { name: "Ланцюг", value: 6 }
+
+    FuelTypesExample:
+      summary: GET /auto/type (LIVE 2026-06, verified)
+      description: >-
+        Live response. Adds ids 11 (MHEV) and 12 (REEV) not present in either
+        wiki version. Ids 7 and 9 are retired. Canonical set for v1.
+      value:
+        - { name: "Бензин", value: 1 }
+        - { name: "Дизель", value: 2 }
+        - { name: "Газ", value: 3 }
+        - { name: "Газ пропан-бутан / Бензин", value: 4 }
+        - { name: "Газ метан / Бензин", value: 8 }
+        - { name: "Гібрид (HEV)", value: 5 }
+        - { name: "Гібрид (PHEV)", value: 10 }
+        - { name: "Гібрид (MHEV)", value: 11 }
+        - { name: "Гібрид (REEV)", value: 12 }
+        - { name: "Електро", value: 6 }
+
+    GearboxesExample:
+      summary: GET /auto/categories/2/gearboxes
+      value:
+        - { name: "Ручна / Механіка", value: 1 }
+        - { name: "Автомат", value: 2 }
+        - { name: "Типтронік", value: 3 }
+        - { name: "Робот", value: 4 }
+        - { name: "Варіатор", value: 5 }
+
+    OptionsExample:
+      summary: GET /auto/categories/1/options (truncated)
+      value:
+        - { name: "Антиблокувальна система (ABS)", value: 217 }
+        - { name: "Антипробуксовочна система (ASR)", value: 606 }
+        - { name: "Датчик тиску в шинах", value: 620 }
+        - { name: "Іммобілайзер", value: 604 }
+
+    OptionsV2Example:
+      summary: GET /used_auto/get_options/1/optionsV2 (truncated)
+      value:
+        binary:
+          "1":
+            groupId: 1
+            rewrite: "security"
+            translates: { uk: "Безпека", ru: "Безопасность" }
+            options:
+              - id: 7
+                rewrite: "abs"
+                translates: { uk: "Антиблокувальна система (ABS)", ru: "Антиблокировочная система (ABS)" }
+                typeId: 1
+          "7": null
+          "8": null
+
+    ColorsExample:
+      summary: GET /auto/colors
+      value:
+        - { name: "Бежевий", value: 1 }
+        - { name: "Чорний", value: 2 }
+        - { name: "Синій", value: 3 }
+        - { name: "Коричневий", value: 5 }
+        - { name: "Зелений", value: 7 }
+        - { name: "Сірий", value: 8 }
+        - { name: "Помаранчевий", value: 9 }
+        - { name: "Фіолетовий", value: 12 }
+        - { name: "Червоний", value: 13 }
+        - { name: "Білий", value: 15 }
+        - { name: "Жовтий", value: 16 }
+
+    CountriesExample:
+      summary: GET /auto/countries (LIVE 2026-06, truncated — note 900+ custom block)
+      value:
+        - { name: "Австрія", value: 40 }
+        - { name: "Англія", value: 826 }
+        - { name: "Німеччина", value: 276 }
+        - { name: "Корея", value: 408 }
+        - { name: "США", value: 840 }
+        - { name: "Японія", value: 392 }
+        - { name: "Україна", value: 804 }
+        - { name: "Грузія", value: 900 }
+        - { name: "Хорватія", value: 913 }
+
+    SearchResponseExample:
+      summary: GET /auto/search?category_id=1&marka_id[0]=9 (LIVE 2026-06, ids truncated)
+      description: >-
+        Verified live shape- note lang_id is the string "4", default searchType
+        is 1, default countpage is 10, query_string sits under result.additional,
+        and data[] mixes UsedAuto with an OfferOfTheDay entry (id 100500).
+      value:
+        additional_params:
+          catalog_name: ""
+          elastica: true
+          lang_id: "4"
+          nodejs: true
+          page: 0
+          searchByTypeAction: true
+          section: "auto"
+          target: "search"
+          view_type_id: 0
+        result:
+          active_city: null
+          active_marka:
+            active: 1
+            count: 20468
+            count_newauto: 3995
+            country_id: 276
+            eng: "bmw"
+            fit: 0
+            lang_id: 4
+            main_category: 1
+            marka_id: 9
+            name: "BMW"
+            set_cat: "1,2"
+          active_model: null
+          active_state: null
+          additional:
+            query_string: "category_id=1&marka_id%5B0%5D=9&lang_id=4&langId=4"
+            search_params:
+              all:
+                category_id: 1
+                marka_id: [9]
+                model_id: []
+                currency: 1
+                abroad: false
+                searchType: 1
+                order_by: 0
+                countpage: 10
+                lang_id: "4"
+                gear_id: null
+                fuel_id: null
+              cleaned:
+                category_id: 1
+                marka_id: [9]
+                countpage: 10
+                searchType: 1
+                lang_id: "4"
+            user_auto_positions: []
+          isCommonSearch: true
+          revies: null
+          search_result:
+            count: 19679
+            ids: ["39728975", "39837585", "39963555", "39844927", "39980299"]
+            last_id: 0
+          search_result_common:
+            count: 19679
+            last_id: 0
+            data:
+              - { id: "39728975", type: "UsedAuto" }
+              - { id: "39837585", type: "UsedAuto" }
+              - { id: "100500", type: "OfferOfTheDay" }
+              - { id: "39963555", type: "UsedAuto" }
+
+    ListingInfoExample:
+      summary: GET /auto/info?auto_id=36756951 (photo arrays/vinSvg truncated)
+      value:
+        markId: 9
+        markName: "BMW"
+        markNameEng: "bmw"
+        modelId: 3219
+        modelName: "3 Series"
+        modelNameEng: "3-series"
+        title: "BMW 3 Series"
+        USD: 32999
+        EUR: 30438
+        UAH: 1349659
+        prices:
+          - { EUR: "30 438", UAH: "1 349 659", USD: "32 999" }
+        VIN: "WBA5V7100KFH19523"
+        plateNumber: "HH 5377 AB"
+        linkToView: "/auto_bmw_3_series_36756951.html"
+        addDate: "2024-07-05 11:36:06"
+        updateDate: "2024-07-05 11:36:06"
+        expireDate: "2024-10-05 11:36:06"
+        soldDate: ""
+        auctionPossible: false
+        exchangePossible: true
+        realtyExchange: false
+        userId: 10896536
+        userPhoneData:
+          phone: "(xxx) xxx xx xx"
+        photoData:
+          all: [556088531, 556104180, 556104181]
+          count: 125
+          seoLinkM: "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182m.jpg"
+        stateData:
+          cityId: 12
+          stateId: 12
+          name: "Одеса"
+          regionName: "Одеська"
+          regionNameEng: "odessa"
+        color:
+          eng: "black"
+          hex: "#000000"
+          name: "Чорний"
+        technicalCondition:
+          id: 1
+          langId: 4
+          title: "Повністю непошкоджене"
+          annotation: "Пошкодження відсутні"
+        autoData:
+          autoId: 36756951
+          categoryId: 1
+          year: 2019
+          race: "140 тис. км"
+          raceInt: 140
+          fuelId: 2
+          fuelName: "Дизель, 2 л."
+          fuelNameEng: "dizel"
+          gearBoxId: 2
+          gearboxName: "Автомат"
+          driveId: 1
+          driveName: "Повний"
+          bodyId: 3
+          generationId: 6138
+          generationName: "G20"
+          modificationId: 135908
+          modificationName: "320d Steptronic (190 к.с.) xDrive"
+          equipmentId: 107271
+          equipmentName: "Base"
+          statusId: 0
+          isSold: false
+          mainCurrency: "USD"
+          description: "..."
+        levelData:
+          level: 138
+          period: 1
+          label: 0
+          hotType: ""
+          expireDate: "2024-07-06 11:36:07"
+
+    AveragePriceByParamsRequest:
+      summary: POST body — by car parameters
+      value:
+        langId: 4
+        period: 365
+        params:
+          categoryId: "1"
+          stateId: "1"
+          brandId: "62"
+          modelId: "586"
+          generationId: "3520"
+          modificationId: "161409"
+          year: { gte: "2009", lte: "2014" }
+          bodyId: "2"
+          mileage: { gte: "100", lte: "150" }
+          fuelId: "1"
+          engineVolume: { gte: "1.3", lte: "2" }
+          gearBoxId: "1"
+          driveId: "2"
+          colorId: "2"
+
+    AveragePriceByOmniIdRequest:
+      summary: POST body — by VIN/plate/id
+      value:
+        langId: 4
+        period: 168
+        params:
+          omniId: "WVWZZZ1KZ8P029153"
+
+    AveragePriceByParamsResponse:
+      summary: POST /auto/ai-avarage-price/ (by params, truncated)
+      value:
+        similarCars:
+          - VIN: ""
+            brand: { eng: "renault", id: 62 }
+            model: { eng: "megane", id: 586 }
+            fuel: { name: "Бензин, 1.6 л." }
+            gearbox: { name: "Ручна / Механіка" }
+            id: 34731946
+            level: 15
+            location: { city: { name: "Рівне" } }
+            mainPhoto: "https://cdn2.riastatic.com/photosnew/auto/photo/renault_megane__502594917"
+            price:
+              all:
+                UAH: { currency: { abbreviated: "грн", sign: "₴" }, value: "285 345" }
+                USD: { currency: { abbreviated: null, sign: "$" }, value: "7 650" }
+            race: "233 тис. км"
+            raceInt: 233
+            title: "Renault Megane"
+            uri: "/auto_renault_megane_34731946.html"
+            verifiedVIN: 0
+            year: 2011
+        statisticData:
+          - id: "avgPriceBlock"
+            name: "Середня ціна"
+            price: { UAH: 276648, USD: 7415 }
+            type: "avgPrice"
+
+    AveragePriceByOmniIdResponse:
+      summary: POST /auto/ai-avarage-price/ (by omniId, truncated)
+      value:
+        similarCars:
+          - VIN: ""
+            brand: { eng: "skoda", id: 70 }
+            model: { eng: "octavia", id: 652 }
+            fuel: { name: "Дизель, 1.9 л." }
+            gearbox: { name: "Ручна / Механіка" }
+            id: 34732915
+            level: 0
+            location: { city: { name: "Тячів" } }
+            mainPhoto: "https://cdn2.riastatic.com/photosnew/auto/photo/skoda_octavia__502614632"
+            plateNumber: "AO 7288 CA"
+            price:
+              all:
+                UAH: { currency: { abbreviated: "грн", sign: "₴" }, value: "186 500" }
+                USD: { currency: { abbreviated: null, sign: "$" }, value: "5 000" }
+            race: "440 тис. км"
+            raceInt: 440
+            title: "Skoda Octavia"
+            uri: "/auto_skoda_octavia_34732915.html"
+            verifiedVIN: true
+            year: 2001
+        statisticData:
+          - id: "avgPriceBlock"
+            name: "Середня ціна"
+            price: { UAH: 174117, USD: 4668 }
+            type: "avgPrice"
+
+    StatisticByOmniIdRequest:
+      summary: POST body — by omniId
+      value:
+        langId: 4
+        period: 365
+        params:
+          omniId: "TMBGP21U432674944"
+
+    StatisticByParamsRequest:
+      summary: POST body — by car parameters
+      value:
+        langId: 4
+        period: 365
+        params:
+          categoryId: "1"
+          brandId: "62"
+          modelId: "586"
+          year: { gte: "2009", lte: "2014" }
+
+    StatisticResponseExample:
+      summary: POST /auto/statistic-avarage-price/ (LIVE 2026-06, period=365, truncated)
+      value:
+        graphData:
+          - { advCnt: 4665, date: "06.25", price: { UAH: 180134, USD: 4160 } }
+          - { advCnt: 5321, date: "07.25", price: { UAH: 176454, USD: 4075 } }
+          - { advCnt: 561, date: "06.26", price: { UAH: 170305, USD: 3933 } }
+        noticeData:
+          - linkHref: ""
+            linkText: ""
+            noticeString: "Знайдено Skoda Octavia 2002 за VIN-номером TMBGP21U432674944"
+            noticeType: "success"
+        periodSelectorData:
+          elements:
+            - { name: "Останній місяць", value: 30 }
+            - { name: "3 місяці", value: 90 }
+            - { name: "Останні півроку", value: 180 }
+            - { name: "Останній рік", value: 365 }
+          fieldId: "periodSelector"
+
+    VinParamsRequest:
+      summary: POST body — by omniId
+      value:
+        langId: 4
+        period: 365
+        params:
+          omniId: "TMBGP21U432674944"
+
+    VinParamsResponseExample:
+      summary: POST /auto/params/by/vin-code/ (truncated)
+      value:
+        chipsData:
+          chips:
+            - { entity: "categoryId", id: "categoryId_0", name: "Легкові" }
+            - { entity: "brandId", id: "brandId_0", name: "Skoda" }
+            - { entity: "modelId", id: "modelId_0", name: "Octavia" }
+            - { entity: "bodyId", id: "bodyId_0", name: "Універсал" }
+            - { entity: "fuelId", id: "fuelId_0", name: "Дизель" }
+            - { entity: "gearBoxId", id: "gearBoxId_0", name: "Ручна / Механіка" }
+            - { entity: "driveId", id: "driveId_0", name: "Передній" }
+            - { entity: "colorId", id: "colorId_0", name: "Зелений" }
+            - { entity: "year", id: "year_0", name: "2002 - 2002 рр." }
+          link:
+            text: "Переглянути пропозиції"
+            url: "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&brand.id[0]=70&model.id[0]=652&categories.main.id=1"
+        noticeData:
+          - linkHref: ""
+            linkText: ""
+            noticeString: "Знайдено Skoda Octavia 2002 за VIN-номером TMBGP21U432674944"
+            noticeType: "success"
+        searchType: "VIN"
+
+    VinParamsErrorExample:
+      summary: POST /auto/params/by/vin-code/ — invalid omniId (LIVE 2026-06, HTTP 200)
+      value:
+        noticeData:
+          - linkHref: ""
+            linkText: ""
+            noticeString: "Помилка. Некоректні вхідні данні"
+            noticeType: "error"
+        searchType: "omniId"

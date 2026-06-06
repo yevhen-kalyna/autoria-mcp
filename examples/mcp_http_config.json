@@ -1,0 +1,10 @@
+{
+  "//": "Generic MCP client config for the streamable-HTTP transport.",
+  "//run": "Start the server first: AUTORIA_TRANSPORT=http autoria-mcp --host 127.0.0.1 --port 8000",
+  "mcpServers": {
+    "autoria": {
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
