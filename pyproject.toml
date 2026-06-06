@@ -11,9 +11,11 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP",
   "Topic :: Software Development :: Libraries",
   "Typing :: Typed",
 ]
@@ -39,6 +41,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autoria_mcp"]
+
+# TestPyPI publish target for the release workflow's dry-run path.
+# `uv publish --index testpypi` uploads here; the default `uv publish` goes to PyPI.
+# `explicit = true` keeps it from ever being used for resolution/installs.
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
 
 [dependency-groups]
 # Installed by `uv sync` by default (the "dev" group is on unless --no-dev).
