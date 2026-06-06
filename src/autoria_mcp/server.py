@@ -19,6 +19,7 @@ from mcp.server.fastmcp import FastMCP
 from autoria_mcp import __version__
 from autoria_mcp.config import Settings, Transport, get_settings
 from autoria_mcp.logging_config import configure_logging
+from autoria_mcp.runtime import make_runtime_lifespan
 from autoria_mcp.tools import register_all
 
 # Public transport values exposed on the CLI / via AUTORIA_TRANSPORT.
@@ -47,7 +48,9 @@ def build_server(settings: Settings) -> FastMCP:
     """Construct the FastMCP app and register all tools.
 
     Kept separate from :func:`main` so tests can build and introspect the server
-    without starting an event loop or a transport.
+    without starting an event loop or a transport. The runtime lifespan only runs
+    once a transport (or an in-process session) starts, so ``build_server`` and
+    ``list_tools`` stay side-effect-free and need no credentials.
     """
     mcp = FastMCP(
         "autoria",
@@ -59,6 +62,7 @@ def build_server(settings: Settings) -> FastMCP:
         host=settings.host,
         port=settings.port,
         log_level=_log_level_literal(settings.log_level),
+        lifespan=make_runtime_lifespan(settings),
     )
     register_all(mcp)
     return mcp

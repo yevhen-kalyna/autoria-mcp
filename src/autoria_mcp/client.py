@@ -155,13 +155,21 @@ class AutoRiaClient:
         """GET ``path`` and return decoded JSON. Injects ``api_key``."""
         return await self._request("GET", path, params, needs_user_id=False)
 
-    async def post_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def post_json(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        json_body: Any = None,
+    ) -> Any:
         """POST ``path`` (paid endpoints) and return decoded JSON.
 
-        Injects both ``api_key`` and ``user_id`` and raises on the HTTP-200
-        ``noticeData`` error shape.
+        ``api_key`` and ``user_id`` are injected as query params (per the API);
+        ``json_body``, when given, is sent as the ``application/json`` request
+        body (httpx sets the ``Content-Type`` header automatically). Raises on
+        the HTTP-200 ``noticeData`` error shape these endpoints use.
         """
-        return await self._request("POST", path, params, needs_user_id=True)
+        return await self._request("POST", path, params, needs_user_id=True, json_body=json_body)
 
     # -- internals -----------------------------------------------------------
 
@@ -191,13 +199,14 @@ class AutoRiaClient:
         params: dict[str, Any] | None,
         *,
         needs_user_id: bool,
+        json_body: Any = None,
     ) -> Any:
         query = self._build_query(params, needs_user_id=needs_user_id)
         attempts = self._settings.max_retries + 1
 
         for attempt in range(attempts):
             logger.debug("%s %s params=%s", method, path, _safe_params(query))
-            response = await self._http.request(method, path, params=query)
+            response = await self._http.request(method, path, params=query, json=json_body)
             status = response.status_code
 
             if status < 400:

@@ -5,17 +5,23 @@ An [MCP](https://modelcontextprotocol.io) server that exposes the
 agents — programmatic, agent-friendly access to the Ukrainian used-car market
 through the sanctioned API, no scraping.
 
-> **Status: Phase 2 (scaffold).** The server boots and answers a `ping` health
-> check. Real search/lookup tools land in the next releases — see
-> [Roadmap](#roadmap).
+> **Status: Phase 4.** The full tool surface is live — curated search/lookup
+> tools, paid statistics tools, thin endpoint mirrors, and browsable dictionary
+> resources — all backed by caching and the typed async client. Docs polish and
+> the first PyPI release are next; see [Roadmap](#roadmap).
 
-## Features (planned)
+## Features
 
 - **Curated, high-level tools** that take human-friendly inputs (brand, model,
   region, year/price ranges) and resolve them to AUTO.RIA's numeric IDs for you.
+- **Paid statistics tools** (AI average price, price-over-time, VIN decode) that
+  fail fast with a clear error when `AUTORIA_USER_ID` is unset — no wasted quota.
 - **Thin endpoint mirrors** for the long-tail dictionary/lookup endpoints.
-- **Aggressive caching** of the large, slow-changing dictionaries so name→ID
-  resolution costs no quota after the first fetch.
+- **Dictionary resources** — browse categories, colours, regions, etc. as
+  addressable `autoria://dict/...` documents.
+- **Aggressive, tiered caching**: large slow-changing dictionaries are cached on
+  disk for 7 days (name→ID resolution costs no quota after the first fetch),
+  while volatile search/statistics responses are cached briefly, in memory only.
 - **stdio and streamable-HTTP** transports.
 
 ## Install
@@ -48,6 +54,8 @@ All settings are read from environment variables (prefix `AUTORIA_`) or a local
 | `AUTORIA_BASE_URL`   | `https://developers.ria.com`  | API host (only the production host is documented).                 |
 | `AUTORIA_CACHE_DIR`  | `~/.cache/autoria-mcp`        | On-disk dictionary cache location.                                 |
 | `AUTORIA_CACHE_TTL`  | `604800` (7 days)             | Default dictionary cache TTL, in seconds.                          |
+| `AUTORIA_VOLATILE_TTL` | `600` (10 min)              | Memory-only TTL for volatile search/statistics responses.          |
+| `AUTORIA_MEMORY_CACHE_MAX` | `256`                   | Max entries per in-memory cache tier (bounded LRU).                |
 | `AUTORIA_MAX_RETRIES` | `3`                          | Retry attempts on `429` / `5xx` (backoff + full jitter).           |
 | `AUTORIA_BACKOFF_BASE` | `0.5`                       | Base backoff delay, in seconds.                                    |
 | `AUTORIA_BACKOFF_CAP` | `8.0`                        | Max delay for a single backoff sleep, in seconds.                  |
@@ -89,14 +97,36 @@ re-fetched needlessly.
 
 ## Tool catalog
 
-| Tool   | Status     | Description                          |
-| ------ | ---------- | ------------------------------------ |
-| `ping` | ✅ available | Zero-quota liveness/diagnostic check. |
+**Curated tools** — natural inputs (names, ranges), resolved to IDs for you:
 
-> Curated tools (`search_used_cars`, `get_car_details`, `get_average_price`,
-> `lookup_brands`, `lookup_models`, `lookup_regions`) and thin endpoint mirrors
-> for the remaining 27 operations land in Phases 3–4. This table will grow as
-> they ship.
+| Tool                | Description                                                              |
+| ------------------- | ----------------------------------------------------------------------- |
+| `search_used_cars`  | Search listings by brand/model/region/year/price/etc.; returns ids + a canonical `search_url`. |
+| `get_car_details`   | Compact details for one advert id (price, year, mileage, VIN-if-shown, masked phone, URL). |
+| `lookup_brands`     | List passenger-car brands, or resolve one brand name to its id.         |
+| `lookup_models`     | List a brand's models, or resolve one model name to its id.             |
+| `lookup_regions`    | List regions (oblasts), or resolve one region name to its id.           |
+| `lookup_cities`     | List a region's cities, or resolve one city name to its id.             |
+
+**Paid tools** (require `AUTORIA_USER_ID`; fail fast with a clear error otherwise):
+
+| Tool                            | Description                                              |
+| ------------------------------- | ------------------------------------------------------- |
+| `get_average_price`             | AI average price + comparable listings (by params or `omni_id`). |
+| `get_average_price_over_periods`| Monthly average-price time series.                      |
+| `get_params_by_vin`             | Decode a VIN / plate / advert id into car-parameter chips. |
+
+**Thin mirrors** (raw passthrough, 7-day cached): `list_categories`,
+`list_all_models`, `list_models_grouped`, `list_generations`, `list_modifications`,
+`list_modifications_by_body`, `list_equipment`, `list_options`, `list_options_v2`,
+`list_colors`, `list_countries`, `list_drive_types`, `list_fuel_types`,
+`list_gearboxes`, `list_body_styles`, `list_body_styles_grouped`,
+`list_all_body_styles`, `list_bodies_by_generation`, and `raw_search` (raw V1 search).
+
+**Resources**: `autoria://dict/{categories,colors,countries,fuel-types,gearboxes,
+body-styles,states}` and the templated `autoria://dict/models/{categoryId}/{markId}`.
+
+**Health**: `ping` — zero-quota liveness/diagnostic check.
 
 ## Development
 
@@ -104,7 +134,7 @@ re-fetched needlessly.
 uv sync                     # create venv + install deps (incl. dev group)
 uv run ruff check .         # lint
 uv run ruff format --check .  # format check
-uv run mypy src             # strict type check
+uv run mypy                 # strict type check (src + tests)
 uv run pytest               # tests (no network)
 pre-commit install          # enable git hooks
 ```
@@ -116,9 +146,9 @@ The OpenAPI 3.1 description lives in
 
 1. ✅ **Phase 1** — OpenAPI spec, live-verified API facts.
 2. ✅ **Phase 2** — repo scaffold, tooling, CI, packaging, runnable server.
-3. ⏭️ **Phase 3** — typed async client, TTL dictionary cache, name→ID resolution,
+3. ✅ **Phase 3** — typed async client, TTL dictionary cache, name→ID resolution,
    recorded-fixture tests (zero live quota).
-4. ⏭️ **Phase 4** — curated + thin tools, dictionary MCP resources.
+4. ✅ **Phase 4** — curated + paid + thin tools, dictionary MCP resources.
 5. ⏭️ **Phase 5** — docs, examples, first PyPI release.
 
 ## License

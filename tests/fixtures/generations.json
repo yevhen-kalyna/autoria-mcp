@@ -1,0 +1,24 @@
+[
+  {
+    "name": "Caravelle",
+    "id": 1653,
+    "generations": [
+      {
+        "generationId": 16,
+        "name": "III покоління (FL)/T5",
+        "yearFrom": 2009,
+        "yearTo": 2015,
+        "modelId": 1653,
+        "eng": "t5-fl"
+      },
+      {
+        "generationId": 17,
+        "name": "IV покоління/T6",
+        "yearFrom": 2015,
+        "yearTo": 2019,
+        "modelId": 1653,
+        "eng": "t6"
+      }
+    ]
+  }
+]

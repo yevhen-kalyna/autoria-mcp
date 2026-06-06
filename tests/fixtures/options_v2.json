@@ -1,0 +1,22 @@
+{
+  "binary": {
+    "1": {
+      "groupId": 1,
+      "rewrite": "security",
+      "translates": { "uk": "Безпека", "ru": "Безопасность" },
+      "options": [
+        {
+          "id": 7,
+          "rewrite": "abs",
+          "translates": {
+            "uk": "Антиблокувальна система (ABS)",
+            "ru": "Антиблокировочная система (ABS)"
+          },
+          "typeId": 1
+        }
+      ]
+    },
+    "7": null,
+    "8": null
+  }
+}

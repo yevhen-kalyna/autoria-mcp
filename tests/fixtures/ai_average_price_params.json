@@ -1,0 +1,35 @@
+{
+  "similarCars": [
+    {
+      "VIN": "",
+      "brand": { "eng": "renault", "id": 62 },
+      "model": { "eng": "megane", "id": 586 },
+      "fuel": { "name": "Бензин, 1.6 л." },
+      "gearbox": { "name": "Ручна / Механіка" },
+      "id": 34731946,
+      "level": 15,
+      "location": { "city": { "name": "Рівне" } },
+      "mainPhoto": "https://cdn2.riastatic.com/photosnew/auto/photo/renault_megane__502594917",
+      "price": {
+        "all": {
+          "UAH": { "currency": { "abbreviated": "грн", "sign": "₴" }, "value": "285 345" },
+          "USD": { "currency": { "abbreviated": null, "sign": "$" }, "value": "7 650" }
+        }
+      },
+      "race": "233 тис. км",
+      "raceInt": 233,
+      "title": "Renault Megane",
+      "uri": "/auto_renault_megane_34731946.html",
+      "verifiedVIN": 0,
+      "year": 2011
+    }
+  ],
+  "statisticData": [
+    {
+      "id": "avgPriceBlock",
+      "name": "Середня ціна",
+      "price": { "UAH": 276648, "USD": 7415 },
+      "type": "avgPrice"
+    }
+  ]
+}

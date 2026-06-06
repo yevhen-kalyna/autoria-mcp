@@ -1,0 +1,36 @@
+{
+  "similarCars": [
+    {
+      "VIN": "",
+      "brand": { "eng": "skoda", "id": 70 },
+      "model": { "eng": "octavia", "id": 652 },
+      "fuel": { "name": "Дизель, 1.9 л." },
+      "gearbox": { "name": "Ручна / Механіка" },
+      "id": 34732915,
+      "level": 0,
+      "location": { "city": { "name": "Тячів" } },
+      "mainPhoto": "https://cdn2.riastatic.com/photosnew/auto/photo/skoda_octavia__502614632",
+      "plateNumber": "AO 7288 CA",
+      "price": {
+        "all": {
+          "UAH": { "currency": { "abbreviated": "грн", "sign": "₴" }, "value": "186 500" },
+          "USD": { "currency": { "abbreviated": null, "sign": "$" }, "value": "5 000" }
+        }
+      },
+      "race": "440 тис. км",
+      "raceInt": 440,
+      "title": "Skoda Octavia",
+      "uri": "/auto_skoda_octavia_34732915.html",
+      "verifiedVIN": true,
+      "year": 2001
+    }
+  ],
+  "statisticData": [
+    {
+      "id": "avgPriceBlock",
+      "name": "Середня ціна",
+      "price": { "UAH": 174117, "USD": 4668 },
+      "type": "avgPrice"
+    }
+  ]
+}

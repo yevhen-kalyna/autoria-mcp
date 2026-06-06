@@ -1,0 +1,24 @@
+{
+  "graphData": [
+    { "advCnt": 4665, "date": "06.25", "price": { "UAH": 180134, "USD": 4160 } },
+    { "advCnt": 5321, "date": "07.25", "price": { "UAH": 176454, "USD": 4075 } },
+    { "advCnt": 561, "date": "06.26", "price": { "UAH": 170305, "USD": 3933 } }
+  ],
+  "noticeData": [
+    {
+      "linkHref": "",
+      "linkText": "",
+      "noticeString": "Знайдено Skoda Octavia 2002 за VIN-номером TMBGP21U432674944",
+      "noticeType": "success"
+    }
+  ],
+  "periodSelectorData": {
+    "elements": [
+      { "name": "Останній місяць", "value": 30 },
+      { "name": "3 місяці", "value": 90 },
+      { "name": "Останні півроку", "value": 180 },
+      { "name": "Останній рік", "value": 365 }
+    ],
+    "fieldId": "periodSelector"
+  }
+}

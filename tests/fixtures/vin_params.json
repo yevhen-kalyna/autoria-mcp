@@ -1,0 +1,28 @@
+{
+  "chipsData": {
+    "chips": [
+      { "entity": "categoryId", "id": "categoryId_0", "name": "Легкові" },
+      { "entity": "brandId", "id": "brandId_0", "name": "Skoda" },
+      { "entity": "modelId", "id": "modelId_0", "name": "Octavia" },
+      { "entity": "bodyId", "id": "bodyId_0", "name": "Універсал" },
+      { "entity": "fuelId", "id": "fuelId_0", "name": "Дизель" },
+      { "entity": "gearBoxId", "id": "gearBoxId_0", "name": "Ручна / Механіка" },
+      { "entity": "driveId", "id": "driveId_0", "name": "Передній" },
+      { "entity": "colorId", "id": "colorId_0", "name": "Зелений" },
+      { "entity": "year", "id": "year_0", "name": "2002 - 2002 рр." }
+    ],
+    "link": {
+      "text": "Переглянути пропозиції",
+      "url": "https://auto.ria.com/uk/search/?indexName=auto,order_auto,newauto_search&brand.id[0]=70&model.id[0]=652&categories.main.id=1"
+    }
+  },
+  "noticeData": [
+    {
+      "linkHref": "",
+      "linkText": "",
+      "noticeString": "Знайдено Skoda Octavia 2002 за VIN-номером TMBGP21U432674944",
+      "noticeType": "success"
+    }
+  ],
+  "searchType": "VIN"
+}

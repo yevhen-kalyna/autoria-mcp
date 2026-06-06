@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 4 — MCP tool surface.**
+  - Curated tools: `search_used_cars` (name→V1-ID resolution, single request,
+    OfferOfTheDay `100500` filtering, V1 silent-ignore sanity check, canonical
+    `search_url`), `get_car_details`, and `lookup_brands`/`lookup_models`/
+    `lookup_regions`/`lookup_cities`.
+  - Paid tools (fail fast without `AUTORIA_USER_ID`): `get_average_price`,
+    `get_average_price_over_periods`, `get_params_by_vin`. Natural-name inputs
+    with a raw-id escape hatch for generation/modification; `period` validation;
+    notice-error mapping.
+  - Thin endpoint mirrors for the long-tail dictionary/lookup endpoints, plus a
+    raw `raw_search`.
+  - Browsable dictionary MCP resources (`autoria://dict/...`) including a
+    templated models-by-brand resource.
+  - Compact response models and pure shaping/URL helpers with mandatory
+    auto.ria.com attribution links.
+  - Shared async `RuntimeContext` + FastMCP lifespan; bounded-LRU memory cache
+    tier and a memory-only volatile cache; `AUTORIA_VOLATILE_TTL` and
+    `AUTORIA_MEMORY_CACHE_MAX` settings.
+  - `AutoRiaClient.post_json` now supports a JSON request body for paid POSTs.
+- Phase 3: typed async client (retry/backoff, dual error-shape mapping),
+  two-tier dictionary cache, warn-only quota tracker, and name→ID dictionary
+  resolver, with recorded-fixture tests (zero live quota).
 - Project scaffold (Phase 2): uv project, `src/` layout, console entry point
   `autoria-mcp`.
 - `pydantic-settings` configuration loaded from env / `.env` (`AUTORIA_*`).

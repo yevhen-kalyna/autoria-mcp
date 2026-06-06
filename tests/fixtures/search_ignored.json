@@ -1,0 +1,26 @@
+{
+  "result": {
+    "additional": {
+      "query_string": "brand=9&lang_id=4&langId=4",
+      "search_params": {
+        "all": { "category_id": 1, "countpage": 10, "searchType": 1 },
+        "cleaned": { "category_id": 1, "countpage": 10, "searchType": 1 }
+      },
+      "user_auto_positions": []
+    },
+    "search_result": {
+      "count": 356123,
+      "ids": ["1", "2", "3"],
+      "last_id": 0
+    },
+    "search_result_common": {
+      "count": 356123,
+      "last_id": 0,
+      "data": [
+        { "id": "1", "type": "UsedAuto" },
+        { "id": "2", "type": "UsedAuto" },
+        { "id": "3", "type": "UsedAuto" }
+      ]
+    }
+  }
+}
