@@ -1,6 +1,6 @@
 [project]
 name = "autoria-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server exposing the AUTO.RIA used-cars REST API to AI agents."
 readme = "README.md"
 requires-python = ">=3.11"

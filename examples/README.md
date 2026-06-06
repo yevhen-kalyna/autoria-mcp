@@ -20,7 +20,7 @@ paid POST endpoints) with your own values from <https://developers.ria.com>, the
 > OS without your shell's `PATH`, so a bare `"command": "uvx"` often fails with
 > "command not found". Run `which uvx` and use the absolute path it prints (e.g.
 > `/opt/homebrew/bin/uvx` on Apple Silicon, `/usr/local/bin/uvx` on Intel macOS).
-> The config below uses the bare name for brevity — swap in your full path.
+> The sample `claude_desktop_config.json` uses the bare name for brevity — swap in your full path.
 
 > Prefer not to put secrets in the client config? Omit the `env` block and put
 > `AUTORIA_API_KEY` in a `.env` file in your working directory or your shell env.

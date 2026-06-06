@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-06
+
+Docs/registry-only release — no tool, resource, or API changes.
+
+### Added
+
+- **Official MCP Registry listing** as `io.github.yevhen-kalyna/autoria-mcp`:
+  added a root `server.json` (metadata pointing at the PyPI package, `stdio`
+  transport, documented env vars) and a `mcp-name` ownership marker in the README
+  (= PyPI description). The release pipeline now publishes to the registry via OIDC
+  after the PyPI upload, with a tag/version guard so `pyproject`, `server.json`,
+  and the git tag can't drift.
+
+### Fixed
+
+- **Claude Desktop config example** in the README — the previous block told users
+  to delete the `AUTORIA_USER_ID` line, which left an invalid trailing comma after
+  `AUTORIA_API_KEY`. Replaced with a valid minimal block (API key only) and
+  documented `AUTORIA_USER_ID` as an optional key to add for the paid tools.
+- **`examples/README.md`** — corrected a sentence that referred to a non-existent
+  inline config block; it now points at the sample `claude_desktop_config.json`.
+
 ## [0.1.0] - 2026-06-06
 
 First public release — the full MCP surface for the AUTO.RIA used-cars API,
@@ -47,5 +69,6 @@ backed by a typed async client, tiered caching, and an OIDC release pipeline.
   audit trail, README (config + tool catalog + quota guidance + known
   limitations), runnable `examples/`, `CONTRIBUTING.md`, and `SECURITY.md`.
 
-[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yevhen-kalyna/autoria-mcp/releases/tag/v0.1.0

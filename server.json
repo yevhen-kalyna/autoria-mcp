@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yevhen-kalyna/autoria-mcp",
+  "title": "AUTO.RIA Used Cars",
+  "description": "MCP server for the AUTO.RIA (ria.com) used-car API: search, listings, AI average prices.",
+  "repository": {
+    "url": "https://github.com/yevhen-kalyna/autoria-mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "autoria-mcp",
+      "version": "0.1.1",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "AUTORIA_API_KEY",
+          "description": "AUTO.RIA developer API key",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "AUTORIA_USER_ID",
+          "description": "AUTO.RIA user id (required for paid average-price / VIN tools)",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
