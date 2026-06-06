@@ -50,6 +50,38 @@ test. Scrub any `api_key` / `user_id` from captured payloads before committing.
   tool surface changes.
 - Make sure all four quality gates above are green before requesting review.
 
+## Releasing (maintainers)
+
+Publishing uses GitHub Actions + OIDC Trusted Publishing (no tokens). The publish
+steps **cannot be validated locally** — `uv build` / `twine check` never exercise
+them — so always rehearse on TestPyPI before tagging.
+
+1. **Bump the version** in `pyproject.toml` and move `CHANGELOG.md`'s `Unreleased`
+   entries under a dated release heading. The git tag must match this version.
+2. **Dry-run to TestPyPI**: Actions → *Release* → **Run workflow**
+   (`workflow_dispatch`). This builds, runs `twine check`, and publishes to
+   TestPyPI (ungated). Treat this as a required gate, not a one-off.
+3. **Smoke-test the published TestPyPI artifact** in a clean environment — this
+   installs the *uploaded* wheel, not your local source. Run it **outside** the
+   repo so the local project doesn't shadow it; dependencies resolve from PyPI
+   (TestPyPI doesn't carry them), while `--index` pulls `autoria-mcp` from TestPyPI:
+
+   ```sh
+   uv run --isolated --no-project \
+     --index https://test.pypi.org/simple/ \
+     --with autoria-mcp \
+     autoria-mcp --version
+   ```
+
+4. **Release**: push the tag — `git tag vX.Y.Z && git push origin vX.Y.Z`. The
+   tag run publishes to PyPI via the reviewer-gated `pypi` environment; approve the
+   pending `publish-pypi` job in the Actions UI.
+
+First-time setup (once per index): add the GitHub Trusted Publisher on PyPI and
+TestPyPI (repo `yevhen-kalyna/autoria-mcp`, workflow `release.yml`, environments
+`pypi` / `testpypi`), and create those two environments in repo settings (add a
+required reviewer to `pypi`).
+
 ## Reporting security issues
 
 Please do **not** open a public issue for vulnerabilities — see

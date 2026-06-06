@@ -73,9 +73,11 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Publish to TestPyPI
-        # --check-url makes re-runs idempotent (skip already-uploaded files);
-        # --trusted-publishing always fails loudly if OIDC is misconfigured.
-        run: uv publish --index testpypi --trusted-publishing always --check-url https://test.pypi.org/simple/
+        # --index already carries the check URL (its `url`), so re-runs skip
+        # already-uploaded files without a separate --check-url (the two flags
+        # are mutually exclusive). --trusted-publishing always fails loudly if
+        # OIDC is misconfigured.
+        run: uv publish --index testpypi --trusted-publishing always
 
   publish-pypi:
     name: Publish to PyPI (Trusted Publishing / OIDC)
