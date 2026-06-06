@@ -1,0 +1,11 @@
+{
+  "noticeData": [
+    {
+      "linkHref": "",
+      "linkText": "",
+      "noticeString": "Помилка. Некоректні вхідні данні",
+      "noticeType": "error"
+    }
+  ],
+  "searchType": "omniId"
+}

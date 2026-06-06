@@ -1,0 +1,13 @@
+[
+  { "name": "Седан", "value": 3, "parentId": 0 },
+  { "name": "Позашляховик / Кросовер", "value": 5, "parentId": 0 },
+  { "name": "Мінівен", "value": 8, "parentId": 0 },
+  { "name": "Хетчбек", "value": 4, "parentId": 0 },
+  { "name": "Унiверсал", "value": 2, "parentId": 0 },
+  { "name": "Купе", "value": 6, "parentId": 0 },
+  { "name": "Кабріолет", "value": 7, "parentId": 0 },
+  { "name": "Пікап", "value": 9, "parentId": 0 },
+  { "name": "Ліфтбек", "value": 307, "parentId": 0 },
+  { "name": "Лімузин", "value": 252, "parentId": 0 },
+  { "name": "Родстер", "value": 315, "parentId": 0 }
+]

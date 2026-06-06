@@ -48,6 +48,12 @@ All settings are read from environment variables (prefix `AUTORIA_`) or a local
 | `AUTORIA_BASE_URL`   | `https://developers.ria.com`  | API host (only the production host is documented).                 |
 | `AUTORIA_CACHE_DIR`  | `~/.cache/autoria-mcp`        | On-disk dictionary cache location.                                 |
 | `AUTORIA_CACHE_TTL`  | `604800` (7 days)             | Default dictionary cache TTL, in seconds.                          |
+| `AUTORIA_MAX_RETRIES` | `3`                          | Retry attempts on `429` / `5xx` (backoff + full jitter).           |
+| `AUTORIA_BACKOFF_BASE` | `0.5`                       | Base backoff delay, in seconds.                                    |
+| `AUTORIA_BACKOFF_CAP` | `8.0`                        | Max delay for a single backoff sleep, in seconds.                  |
+| `AUTORIA_QUOTA_HOURLY_LIMIT` | `30`                  | Assumed hourly quota; usage warns near it (never blocks).          |
+| `AUTORIA_QUOTA_MONTHLY_LIMIT` | `1000`               | Assumed monthly quota; usage warns near it (never blocks).         |
+| `AUTORIA_QUOTA_WARN_RATIO` | `0.9`                   | Warn once usage crosses this fraction of a window limit.           |
 | `AUTORIA_LOG_LEVEL`  | `INFO`                        | Package log level.                                                 |
 
 The API key is held in a `SecretStr` and never written to logs.

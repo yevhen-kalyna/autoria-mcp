@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "OVER_RATE_LIMIT",
+    "message": "Rate limit exceeded for this api_key."
+  }
+}

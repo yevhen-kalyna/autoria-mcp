@@ -48,6 +48,13 @@ class Settings(BaseSettings):
         host / port: Bind address for the HTTP transport. Ignored for stdio.
         cache_dir: Root directory for the on-disk dictionary cache (Phase 3).
         cache_ttl: Default dictionary cache TTL in seconds (default 7 days).
+        max_retries: Max retry attempts for retryable responses (429 / 5xx).
+        backoff_base: Base delay (seconds) for exponential backoff with jitter.
+        backoff_cap: Upper bound (seconds) on a single backoff sleep.
+        quota_hourly_limit: Assumed hourly request quota (free pkg default 30).
+        quota_monthly_limit: Assumed monthly request quota (free pkg default 1000).
+        quota_warn_ratio: Log a warning once usage crosses this fraction of a
+            window's limit. Accounting is warn-only; requests are never blocked.
         log_level: Root log level for the package logger.
     """
 
@@ -85,6 +92,37 @@ class Settings(BaseSettings):
         default=7 * 24 * 60 * 60,
         ge=0,
         description="Default dictionary cache TTL in seconds.",
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="Max retry attempts for retryable responses (429 / 5xx).",
+    )
+    backoff_base: float = Field(
+        default=0.5,
+        gt=0,
+        description="Base delay (seconds) for exponential backoff with full jitter.",
+    )
+    backoff_cap: float = Field(
+        default=8.0,
+        gt=0,
+        description="Upper bound (seconds) on a single backoff sleep.",
+    )
+    quota_hourly_limit: int = Field(
+        default=30,
+        ge=0,
+        description="Assumed hourly request quota (free package default).",
+    )
+    quota_monthly_limit: int = Field(
+        default=1000,
+        ge=0,
+        description="Assumed monthly request quota (free package default).",
+    )
+    quota_warn_ratio: float = Field(
+        default=0.9,
+        gt=0,
+        le=1,
+        description="Warn once usage crosses this fraction of a window limit.",
     )
     log_level: str = Field(default="INFO", description="Package log level.")
 

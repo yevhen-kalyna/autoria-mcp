@@ -10,7 +10,9 @@ reject them, so an upstream schema change never breaks parsing.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AutoRiaModel(BaseModel):
@@ -28,7 +30,37 @@ class AutoRiaModel(BaseModel):
     )
 
 
-# TODO(phase 4): concrete models, e.g.
-#   class SearchResult(AutoRiaModel): ...
-#   class CarDetails(AutoRiaModel): ...
-#   class DictionaryItem(AutoRiaModel): id: int; name: str
+class DictionaryItem(AutoRiaModel):
+    """A single entry in an AUTO.RIA dictionary endpoint.
+
+    The wire shape is ``{"name": "...", "value": <id>}`` (``value`` is the numeric
+    id RIA uses in ``<option>`` dropdowns). We alias it to a clean ``id``. Some
+    dictionaries (e.g. body styles) add ``parentId`` to express grouping.
+    """
+
+    id: int = Field(alias="value")
+    name: str
+    parent_id: int | None = Field(default=None, alias="parentId")
+
+
+def parse_dictionary(raw: Any) -> list[DictionaryItem]:
+    """Parse a dictionary response into a flat list of :class:`DictionaryItem`.
+
+    Handles both the flat endpoints (``[{name, value}, ...]``) and the
+    heterogeneous ``_group`` endpoints, whose arrays mix flat items with nested
+    sub-arrays of items. Nested sub-arrays are flattened in place; unparsable
+    entries are skipped rather than raising, matching the package's
+    tolerate-upstream-drift policy.
+    """
+    items: list[DictionaryItem] = []
+    if not isinstance(raw, list):
+        return items
+    for entry in raw:
+        if isinstance(entry, list):
+            items.extend(parse_dictionary(entry))
+        elif isinstance(entry, dict):
+            try:
+                items.append(DictionaryItem.model_validate(entry))
+            except ValueError:
+                continue
+    return items

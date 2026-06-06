@@ -1,0 +1,15 @@
+[
+  { "name": "1 Series", "value": 2161 },
+  { "name": "1500", "value": 63521 },
+  [
+    { "name": "1502", "value": 48926 },
+    { "name": "1602", "value": 47380 },
+    { "name": "2002", "value": 47386 }
+  ],
+  { "name": "3 Series", "value": 3219 },
+  [
+    { "name": "X1", "value": 3597 },
+    { "name": "X3", "value": 1866 },
+    { "name": "X5", "value": 96 }
+  ]
+]
