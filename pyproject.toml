@@ -1,6 +1,6 @@
 [project]
 name = "autoria-mcp"
-version = "0.1.1"
+version = "0.2.0"
 description = "MCP server exposing the AUTO.RIA used-cars REST API to AI agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -85,6 +85,12 @@ select = [
 ]
 ignore = [
   "A003",  # class attribute shadowing a builtin (e.g. `id`) is fine for API models
+  # AUTO.RIA is a Ukrainian marketplace: labels legitimately interleave Latin and
+  # Cyrillic ("190 к.с.", "Гібрид (HEV)", "Газ метан / Бензин"), so the
+  # confusable-character lints are all false positives in this codebase.
+  "RUF001",  # ambiguous char in a string
+  "RUF002",  # ambiguous char in a docstring
+  "RUF003",  # ambiguous char in a comment
 ]
 
 [tool.ruff.lint.per-file-ignores]

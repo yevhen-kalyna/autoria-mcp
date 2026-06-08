@@ -78,26 +78,84 @@ def parse_dictionary(raw: Any) -> list[DictionaryItem]:
 
 
 class SearchResult(AutoRiaModel):
-    """Result of ``search_used_cars``: ids + a set-level attribution URL.
+    """Result of ``search_used_cars``: the total match ``count`` plus the ids.
 
-    Per the project's 1-request rule, search returns only ids (not enriched
-    listings). The canonical per-listing URL comes from ``get_car_details``;
-    ``search_url`` is the auto.ria.com web search that reproduces this query and
-    satisfies the API's mandatory attribution-link condition.
+    Per the project's 1-request rule (and the Public API, which returns only ids
+    + a count), search returns ids — not enriched listings. The canonical
+    per-listing auto.ria.com URL comes from ``get_car_details``.
     """
 
     count: int = 0
     page: int = 0
     page_size: int = 0
     ids: list[str] = Field(default_factory=list)
-    search_url: str = ""
+
+
+class Condition(AutoRiaModel):
+    """Seller-declared technical condition (``technicalCondition``).
+
+    ``id`` is a 1–4 severity enum: 1 fully undamaged, 2 professionally repaired,
+    3 unrepaired damage, 4 not running / for parts. ``id >= 2`` is a damage flag.
+    Note: ``CarDetails.condition`` is ``None`` when the seller did **not** declare
+    a condition — treat that as "unknown", not as "undamaged" (which is ``id == 1``).
+    """
+
+    id: int | None = None
+    title: str | None = None
+    note: str | None = None
+
+
+class RiskFlags(AutoRiaModel):
+    """AUTO.RIA's ``autoInfoBar`` red-flag booleans — the key due-diligence block."""
+
+    damaged: bool | None = None
+    for_parts: bool | None = None
+    confiscated: bool | None = None
+    under_credit: bool | None = None
+    imported: bool | None = None
+    needs_customs: bool | None = None
+
+
+class VinVerification(AutoRiaModel):
+    """Whether AUTO.RIA has any VIN/inspection verification on the listing."""
+
+    vin_shown: bool | None = None
+    has_history_report: bool | None = None
+    inspection_verified: bool | None = None
+    technical_checked: bool | None = None
+
+
+class SellerInfo(AutoRiaModel):
+    """Seller trust signal. ``type`` is ``"private"`` when no dealer is attached."""
+
+    type: str | None = None
+    name: str | None = None
+    verified: bool | None = None
+    reliable: bool | None = None
+
+
+class PhotoLinks(AutoRiaModel):
+    """A representative photo of the listing at AUTO.RIA's published sizes."""
+
+    count: int | None = None
+    b: str | None = None
+    f: str | None = None
+    m: str | None = None
+    sx: str | None = None
 
 
 class CarDetails(AutoRiaModel):
     """Compact detail for a single advert (``get_car_details``).
 
+    Dictionary attributes are returned as both an id and a human label so the
+    agent never has to reverse an opaque integer (``body_id``/``body_name``,
+    ``fuel_id``/``fuel``). Engine displacement and power, which RIA only carries
+    inside free-text labels, are lifted into structured numbers (``engine_volume_l``,
+    ``engine_volume_class``, ``power_hp``) with the raw labels kept alongside.
+
     The phone is always masked upstream; the VIN is present only if the seller
-    revealed it. ``url`` is the canonical auto.ria.com listing link.
+    revealed it. ``url`` is the canonical auto.ria.com listing link. ``mileage_km``
+    and the prices are **seller-declared and unverified**.
     """
 
     id: int | None = None
@@ -110,9 +168,17 @@ class CarDetails(AutoRiaModel):
     year: int | None = None
     mileage_km: int | None = None
     fuel: str | None = None
+    fuel_id: int | None = None
+    engine_volume_l: float | None = None
+    engine_volume_class: float | None = None
+    power_hp: int | None = None
     gearbox: str | None = None
+    gearbox_id: int | None = None
+    gearbox_class: str | None = None  # canonical: manual / automatic / cvt
     drive: str | None = None
+    drive_id: int | None = None
     body_id: int | None = None
+    body_name: str | None = None
     generation: str | None = None
     modification: str | None = None
     color: str | None = None
@@ -121,6 +187,20 @@ class CarDetails(AutoRiaModel):
     vin: str | None = None
     phone: str | None = None
     url: str | None = None
+    # Provenance / due-diligence (seller-declared unless verification says otherwise).
+    condition: Condition | None = None
+    risk: RiskFlags | None = None
+    verification: VinVerification | None = None
+    seller: SellerInfo | None = None
+    photo: PhotoLinks | None = None
+    is_sold: bool | None = None
+    sold_date: str | None = None
+    is_leasing: bool | None = None
+    listed_date: str | None = None
+    updated_date: str | None = None
+    price_negotiable: bool | None = None  # "Торг"
+    exchange_possible: bool | None = None  # "Обмін"
+    description: str | None = None
 
 
 class SimilarCar(AutoRiaModel):
@@ -149,8 +229,29 @@ class StatisticDatum(AutoRiaModel):
 
 
 class AveragePriceResult(AutoRiaModel):
-    """Point-in-time average price plus the comparable listings it derives from."""
+    """Point-in-time average price plus the comparable listings it derives from.
 
+    The headline ``avg_price_*`` is **AUTO.RIA's own AI estimate**, not a figure
+    we recompute. To make its reliability legible (the API exposes no population
+    distribution — only a small ``similar_cars`` sample), we add the sample size,
+    the sample's own USD spread, and a ``price_consistency`` flag that trips when
+    the headline falls outside the spread of the very comps it cites. ``cohort``
+    echoes the resolved filters and ``status`` distinguishes a real answer from
+    no/insufficient data.
+    """
+
+    avg_price_usd: int | None = None
+    avg_price_uah: int | None = None
+    sample_count: int = 0
+    sample_min_usd: int | None = None
+    sample_median_usd: int | None = None
+    sample_max_usd: int | None = None
+    # "ok" | "avg_below_sample" | "avg_above_sample" | None (not computable)
+    price_consistency: str | None = None
+    cohort: dict[str, Any] | None = None
+    period: int | None = None
+    status: str = "ok"  # "ok" | "no_data" | "insufficient_sample"
+    quota: dict[str, int] | None = None
     similar_cars: list[SimilarCar] = Field(default_factory=list)
     statistic_data: list[StatisticDatum] = Field(default_factory=list)
 
@@ -174,6 +275,10 @@ class StatisticSeries(AutoRiaModel):
     graph_data: list[GraphPoint] = Field(default_factory=list)
     period_selector: dict[str, Any] | None = None
     notice: list[dict[str, Any]] = Field(default_factory=list)
+    cohort: dict[str, Any] | None = None
+    period: int | None = None
+    status: str = "ok"  # "ok" | "no_data"
+    quota: dict[str, int] | None = None
 
 
 class VinChip(AutoRiaModel):

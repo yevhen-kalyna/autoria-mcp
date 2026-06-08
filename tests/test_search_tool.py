@@ -11,7 +11,11 @@ import respx
 from autoria_mcp.client import AutoRiaError
 from autoria_mcp.config import Settings
 from autoria_mcp.runtime import RuntimeContext
-from autoria_mcp.tools.search import build_search_query, search_used_cars_impl
+from autoria_mcp.tools.search import (
+    build_search_query,
+    resolve_order_by,
+    search_used_cars_impl,
+)
 from tests.conftest import load_fixture
 
 BASE = "https://developers.ria.com"
@@ -29,7 +33,7 @@ def _mock_brand_model() -> None:
 
 
 @respx.mock
-async def test_search_resolves_filters_and_builds_url(
+async def test_search_resolves_filters_and_returns_ids(
     settings: Settings, make_runtime: MakeRuntime
 ) -> None:
     _mock_brand_model()
@@ -42,8 +46,6 @@ async def test_search_resolves_filters_and_builds_url(
 
     assert result.count == 19679
     assert result.ids == ["39728975", "39837585", "39963555"]  # 100500 filtered out
-    assert "brand.id[0]=9" in result.search_url
-    assert "model.id[0]=3219" in result.search_url
 
 
 @respx.mock
@@ -106,7 +108,7 @@ async def test_build_search_query_maps_to_v1_wire_names(
     assert wire["currency"] == 2  # EUR
     assert wire["raceFrom"] == 50  # km -> thousands
     assert wire["raceTo"] == 150
-    assert wire["searchType"] == 1
+    assert wire["searchType"] == 4  # used-only, so count excludes new autos
     assert wire["countpage"] == 10
     assert resolved == {"category_id": 1, "marka_id": 9, "model_id": 3219}
 
@@ -118,3 +120,55 @@ async def test_search_model_without_brand_raises(
     async with rt.client:
         with pytest.raises(AutoRiaError):
             await build_search_query(rt, model="3 Series")
+
+
+def test_resolve_order_by_accepts_names_and_ints() -> None:
+    """L: named sorts map to V1 ints; ints pass through; junk is rejected."""
+    assert resolve_order_by("price_asc") == 2
+    assert resolve_order_by("PRICE_DESC") == 3
+    assert resolve_order_by("relevance") == 0
+    assert resolve_order_by(13) == 13  # mileage_asc legacy int
+    with pytest.raises(AutoRiaError):
+        resolve_order_by("cheapest")
+    with pytest.raises(AutoRiaError):
+        resolve_order_by(99)
+
+
+@respx.mock
+async def test_search_named_order_by_reaches_wire(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    _mock_brand_model()
+    rt = make_runtime(settings)
+    async with rt.client:
+        wire, _ = await build_search_query(rt, brand="BMW", order_by="price_asc")
+    assert wire["order_by"] == 2
+
+
+@respx.mock
+async def test_search_maps_engine_power_generation_modification(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """D: engine/power/generation/modification filters reach their V1 wire keys."""
+    _mock_brand_model()
+    rt = make_runtime(settings)
+    async with rt.client:
+        wire, _ = await build_search_query(
+            rt,
+            brand="BMW",
+            engine_volume_from=1.9,
+            engine_volume_to=2.1,
+            power_hp_from=150,
+            power_hp_to=250,
+            generation_id=[559, 560],
+            modification_id=[135908],
+        )
+    assert wire["engineVolumeFrom"] == "1.9"
+    assert wire["engineVolumeTo"] == "2.1"
+    assert wire["powerFrom"] == 150
+    assert wire["powerTo"] == 250
+    assert wire["power_name"] == 1  # hp
+    # Generation = 2-level index, modification = 3-level; multiple span facelifts.
+    assert wire["generation_id[0][0]"] == 559
+    assert wire["generation_id[0][1]"] == 560
+    assert wire["modification_id[0][0][0]"] == 135908

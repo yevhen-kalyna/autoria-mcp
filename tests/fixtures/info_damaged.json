@@ -1,0 +1,56 @@
+{
+  "markName": "Audi",
+  "modelName": "A6",
+  "title": "Audi A6",
+  "subCategoryName": "Унiверсал",
+  "USD": 8500,
+  "UAH": 348000,
+  "VIN": "WAUZZZ4F08N000000",
+  "linkToView": "/auto_audi_a6_40000001.html",
+  "addDate": "2024-05-01 10:00:00",
+  "updateDate": "2024-05-20 12:00:00",
+  "soldDate": "",
+  "auctionPossible": true,
+  "exchangePossible": false,
+  "isLeasing": 1,
+  "technicalChecked": false,
+  "verifiedByInspectionCenter": false,
+  "haveInfotechReport": false,
+  "checkedVin": { "isShow": false, "orderId": 0 },
+  "photoData": {
+    "count": 12,
+    "seoLinkB": "https://cdn2.riastatic.com/photosnew/auto/photo/audi_a6__500000000b.jpg"
+  },
+  "stateData": { "name": "Львів", "regionName": "Львівська" },
+  "color": { "name": "Сірий" },
+  "technicalCondition": {
+    "id": 3,
+    "langId": 4,
+    "title": "Невідремонтовані пошкодження",
+    "annotation": "Авто після ДТП, потребує ремонту"
+  },
+  "autoInfoBar": {
+    "abroad": true,
+    "confiscatedCar": false,
+    "custom": true,
+    "damage": true,
+    "onRepairParts": false,
+    "underCredit": true
+  },
+  "autoData": {
+    "autoId": 40000001,
+    "categoryId": 1,
+    "year": 2014,
+    "raceInt": 250,
+    "fuelId": 2,
+    "fuelName": "Дизель, 3 л.",
+    "gearBoxId": 2,
+    "gearboxName": "Автомат",
+    "driveId": 1,
+    "driveName": "Повний",
+    "bodyId": 2,
+    "modificationName": "3.0 TDI (245 к.с.) quattro",
+    "isSold": false,
+    "description": "Авто з США, після ДТП, на ходу. Розмитнене не повністю."
+  }
+}

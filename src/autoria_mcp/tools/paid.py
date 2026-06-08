@@ -28,6 +28,7 @@ from pydantic import Field
 
 from autoria_mcp.client import AutoRiaConfigError, AutoRiaError
 from autoria_mcp.models import AveragePriceResult, StatisticSeries, VinParams
+from autoria_mcp.quota import QuotaUsage
 from autoria_mcp.runtime import RuntimeContext, get_runtime
 from autoria_mcp.shaping import shape_average_price, shape_statistic, shape_vin
 from autoria_mcp.tools._errors import tool_errors
@@ -41,6 +42,16 @@ _CATEGORY_ID = 1  # passenger cars (default)
 _ALLOWED_PERIODS = frozenset({30, 90, 180, 365})
 # The 3 always-present required keys; by-params mode needs at least one beyond these.
 _REQUIRED_KEYS = frozenset({"categoryId", "brandId", "modelId"})
+
+
+def _quota_snapshot(usage: QuotaUsage) -> dict[str, int]:
+    """Flatten the quota usage into a plain ``dict[str, int]`` for the response."""
+    return {
+        "hour_count": usage["hour_count"],
+        "hour_limit": usage["hour_limit"],
+        "month_count": usage["month_count"],
+        "month_limit": usage["month_limit"],
+    }
 
 
 def _require_user_id(rt: RuntimeContext) -> None:
@@ -60,7 +71,7 @@ def validate_period(period: int) -> int:
     return period
 
 
-def _range(lo: int | None, hi: int | None) -> dict[str, str] | None:
+def _range(lo: int | float | None, hi: int | float | None) -> dict[str, str] | None:
     """Build a ``{gte, lte}`` string range, including only the present bounds."""
     span: dict[str, str] = {}
     if lo is not None:
@@ -86,6 +97,8 @@ async def build_avg_price_params(
     drive: str | None = None,
     body: str | None = None,
     color: str | None = None,
+    engine_volume_from: float | None = None,
+    engine_volume_to: float | None = None,
     generation_id: int | None = None,
     modification_id: int | None = None,
 ) -> dict[str, Any]:
@@ -119,6 +132,10 @@ async def build_avg_price_params(
         params["generationId"] = str(generation_id)
     if modification_id is not None:
         params["modificationId"] = str(modification_id)
+
+    engine_volume = _range(engine_volume_from, engine_volume_to)
+    if engine_volume is not None:
+        params["engineVolume"] = engine_volume
 
     year = _range(year_from, year_to)
     if year is not None:
@@ -191,8 +208,11 @@ async def get_average_price_impl(
     drive: str | None = None,
     body: str | None = None,
     color: str | None = None,
+    engine_volume_from: float | None = None,
+    engine_volume_to: float | None = None,
     generation_id: int | None = None,
     modification_id: int | None = None,
+    include_samples: bool = True,
 ) -> AveragePriceResult:
     _require_user_id(rt)
     validate_period(period)
@@ -212,12 +232,19 @@ async def get_average_price_impl(
         drive=drive,
         body=body,
         color=color,
+        engine_volume_from=engine_volume_from,
+        engine_volume_to=engine_volume_to,
         generation_id=generation_id,
         modification_id=modification_id,
     )
     body_payload = {"langId": _LANG_ID, "period": period, "params": params}
     raw = await _post_cached(rt, AVG_PRICE_PATH, body_payload)
-    return shape_average_price(raw)
+    result = shape_average_price(raw, cohort=params, period=period)
+    result.quota = _quota_snapshot(await rt.client.quota.usage())
+    if not include_samples:
+        # Stats-only mode: keep the sample size/spread, drop the verbose listings.
+        result.similar_cars = []
+    return result
 
 
 async def get_average_price_over_periods_impl(
@@ -238,6 +265,8 @@ async def get_average_price_over_periods_impl(
     drive: str | None = None,
     body: str | None = None,
     color: str | None = None,
+    engine_volume_from: float | None = None,
+    engine_volume_to: float | None = None,
     generation_id: int | None = None,
     modification_id: int | None = None,
 ) -> StatisticSeries:
@@ -259,12 +288,16 @@ async def get_average_price_over_periods_impl(
         drive=drive,
         body=body,
         color=color,
+        engine_volume_from=engine_volume_from,
+        engine_volume_to=engine_volume_to,
         generation_id=generation_id,
         modification_id=modification_id,
     )
     body_payload = {"langId": _LANG_ID, "period": period, "params": params}
     raw = await _post_cached(rt, STATISTIC_PATH, body_payload)
-    return shape_statistic(raw)
+    result = shape_statistic(raw, cohort=params, period=period)
+    result.quota = _quota_snapshot(await rt.client.quota.usage())
+    return result
 
 
 async def get_params_by_vin_impl(rt: RuntimeContext, *, omni_id: str) -> VinParams:
@@ -309,23 +342,59 @@ def register_paid_tools(mcp: FastMCP) -> None:
         drive: Annotated[str | None, Field(default=None, description="Drive type name.")] = None,
         body: Annotated[str | None, Field(default=None, description="Body style name.")] = None,
         color: Annotated[str | None, Field(default=None, description="Colour name.")] = None,
+        engine_volume_from: Annotated[
+            float | None, Field(default=None, description="Min engine volume in litres, e.g. 1.9.")
+        ] = None,
+        engine_volume_to: Annotated[
+            float | None, Field(default=None, description="Max engine volume in litres, e.g. 2.1.")
+        ] = None,
         generation_id: Annotated[
-            int | None, Field(default=None, description="Raw generation id (improves accuracy).")
+            int | None,
+            Field(
+                default=None,
+                description=(
+                    "Raw generation id (improves accuracy). One only — facelifts are "
+                    "separate ids, so call once per generation to span them."
+                ),
+            ),
         ] = None,
         modification_id: Annotated[
             int | None, Field(default=None, description="Raw modification id (improves accuracy).")
         ] = None,
+        include_samples: Annotated[
+            bool,
+            Field(
+                default=True,
+                description=(
+                    "Include the `similar_cars` comparable listings. Set False for a "
+                    "lighter stats-only response (sample size + spread are still returned)."
+                ),
+            ),
+        ] = True,
     ) -> AveragePriceResult:
         """**Paid.** AI average price + comparable listings (point-in-time).
 
         Two modes: pass `omni_id` (VIN/plate/advert id), OR car parameters by
         name (`brand`+`model` required, plus at least one more filter such as
-        `year_from`/`mileage_to`/`fuel`). Names are resolved to ids for you;
-        `generation_id`/`modification_id` are optional raw ids that sharpen the
-        estimate. Requires `AUTORIA_USER_ID`. `period` ∈ {30, 90, 180, 365}.
+        `year_from`/`mileage_to`/`fuel`/`engine_volume_from`). Names are resolved
+        to ids for you; `generation_id`/`modification_id` are optional raw ids
+        that sharpen the estimate. Constrain `engine_volume_from`/`_to` (litres)
+        to avoid mixing, e.g., 1.6 and 2.0 cohorts. Requires `AUTORIA_USER_ID`.
+        `period` ∈ {30, 90, 180, 365}.
 
-        Example: `get_average_price(brand="Renault", model="Megane",
-        year_from=2009, year_to=2014, fuel="Бензин", period=365)`.
+        The headline `avg_price_usd`/`avg_price_uah` is AUTO.RIA's own AI estimate.
+        To judge its reliability, the response also returns `sample_count` and the
+        sample's own `sample_min_usd`/`sample_median_usd`/`sample_max_usd`, plus a
+        `price_consistency` flag that is `avg_below_sample`/`avg_above_sample` when
+        the headline falls outside its own comparables. `status` is `no_data` /
+        `insufficient_sample` / `ok`, `cohort` echoes the resolved filters, and
+        `quota` reports remaining API budget.
+
+        Note: facelifts are distinct `generation_id`s and this endpoint takes a
+        single one — call once per generation to price a whole family.
+
+        Example: `get_average_price(brand="Peugeot", model="308", fuel="Дизель",
+        engine_volume_from=1.9, engine_volume_to=2.1, year_from=2014, period=365)`.
         """
         async with tool_errors():
             return await get_average_price_impl(
@@ -344,8 +413,11 @@ def register_paid_tools(mcp: FastMCP) -> None:
                 drive=drive,
                 body=body,
                 color=color,
+                engine_volume_from=engine_volume_from,
+                engine_volume_to=engine_volume_to,
                 generation_id=generation_id,
                 modification_id=modification_id,
+                include_samples=include_samples,
             )
 
     @mcp.tool()
@@ -368,8 +440,21 @@ def register_paid_tools(mcp: FastMCP) -> None:
         drive: Annotated[str | None, Field(default=None, description="Drive type name.")] = None,
         body: Annotated[str | None, Field(default=None, description="Body style name.")] = None,
         color: Annotated[str | None, Field(default=None, description="Colour name.")] = None,
+        engine_volume_from: Annotated[
+            float | None, Field(default=None, description="Min engine volume in litres, e.g. 1.9.")
+        ] = None,
+        engine_volume_to: Annotated[
+            float | None, Field(default=None, description="Max engine volume in litres, e.g. 2.1.")
+        ] = None,
         generation_id: Annotated[
-            int | None, Field(default=None, description="Raw generation id (improves accuracy).")
+            int | None,
+            Field(
+                default=None,
+                description=(
+                    "Raw generation id (improves accuracy). One only — facelifts are "
+                    "separate ids, so call once per generation to span them."
+                ),
+            ),
         ] = None,
         modification_id: Annotated[
             int | None, Field(default=None, description="Raw modification id (improves accuracy).")
@@ -398,6 +483,8 @@ def register_paid_tools(mcp: FastMCP) -> None:
                 drive=drive,
                 body=body,
                 color=color,
+                engine_volume_from=engine_volume_from,
+                engine_volume_to=engine_volume_to,
                 generation_id=generation_id,
                 modification_id=modification_id,
             )

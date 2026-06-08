@@ -28,9 +28,96 @@ _DEFAULT_CATEGORY = 1
 # How many near-matches to surface when a lookup fails.
 _MAX_CANDIDATES = 5
 
+# RIA labels mix Latin and Cyrillic homoglyphs (e.g. body id 2 ships as
+# "Унiверсал" with a *Latin* i). Folding the common confusables to Cyrillic lets
+# a user's correctly-typed Cyrillic name — and our English aliases below — match
+# the stored label. Applied identically to both sides, so it never merges two
+# genuinely distinct labels unless they were already visually identical.
+_LATIN_TO_CYRILLIC = str.maketrans(
+    {
+        "a": "а",
+        "b": "в",
+        "c": "с",
+        "e": "е",
+        "h": "н",
+        "i": "і",
+        "k": "к",
+        "m": "м",
+        "o": "о",
+        "p": "р",
+        "t": "т",
+        "x": "х",
+        "y": "у",
+    }
+)
+
+# English (and a few transliterated) aliases for the localized filter
+# vocabularies, normalized lhs -> normalized target label. Consulted only after
+# an exact match misses, so they never override a real localized name. An alias
+# that resolves to several entries (e.g. "hybrid") surfaces the normal ambiguity
+# error rather than guessing.
+_FUEL_ALIASES: dict[str, str] = {
+    "diesel": "дизель",
+    "petrol": "бензин",
+    "gasoline": "бензин",
+    "gas": "бензин",
+    "electric": "електро",
+    "ev": "електро",
+    "hybrid": "гібрид (hev)",
+    "hev": "гібрид (hev)",
+    "mhev": "гібрид (mhev)",
+    "phev": "гібрид (phev)",
+    "reev": "гібрид (reev)",
+    "lpg": "газ пропан-бутан / бензин",
+    "cng": "газ метан / бензин",
+}
+_GEARBOX_ALIASES: dict[str, str] = {
+    "manual": "ручна / механіка",
+    "mt": "ручна / механіка",
+    "automatic": "автомат",
+    "auto": "автомат",
+    "at": "автомат",
+    "tiptronic": "типтронік",
+    "robot": "робот",
+    "amt": "робот",
+    "dct": "робот",
+    "dsg": "робот",
+    "cvt": "варіатор",
+    "variator": "варіатор",
+}
+_BODY_ALIASES: dict[str, str] = {
+    "sedan": "седан",
+    "saloon": "седан",
+    "wagon": "унiверсал",
+    "estate": "унiверсал",
+    "touring": "унiверсал",
+    "avant": "унiверсал",
+    "universal": "унiверсал",
+    "hatchback": "хетчбек",
+    "hatch": "хетчбек",
+    "liftback": "ліфтбек",
+    "sportback": "ліфтбек",
+    "fastback": "ліфтбек",
+    "suv": "позашляховик / кросовер",
+    "crossover": "позашляховик / кросовер",
+    "coupe": "купе",
+    "convertible": "кабріолет",
+    "cabriolet": "кабріолет",
+    "pickup": "пікап",
+    "minivan": "мінівен",
+    "mpv": "мінівен",
+    "limousine": "лімузин",
+    "roadster": "родстер",
+}
+
 
 def _normalize(name: str) -> str:
     return name.strip().casefold()
+
+
+def _fold(name: str) -> str:
+    """Normalized form with Latin/Cyrillic homoglyphs folded to Cyrillic."""
+    return _normalize(name).translate(_LATIN_TO_CYRILLIC)
 
 
 class DictionaryResolver:
@@ -80,15 +167,15 @@ class DictionaryResolver:
 
     async def gearbox_id(self, name: str, *, category_id: int = _DEFAULT_CATEGORY) -> int:
         items = await self._fetch(f"/auto/categories/{category_id}/gearboxes")
-        return self._match(items, name, what="gearbox")
+        return self._match(items, name, what="gearbox", aliases=_GEARBOX_ALIASES)
 
     async def fuel_id(self, name: str) -> int:
         items = await self._fetch("/auto/type")
-        return self._match(items, name, what="fuel type")
+        return self._match(items, name, what="fuel type", aliases=_FUEL_ALIASES)
 
     async def body_id(self, name: str, *, category_id: int = _DEFAULT_CATEGORY) -> int:
         items = await self._fetch(f"/auto/categories/{category_id}/bodystyles")
-        return self._match(items, name, what="body style")
+        return self._match(items, name, what="body style", aliases=_BODY_ALIASES)
 
     async def drive_id(self, name: str, *, category_id: int = _DEFAULT_CATEGORY) -> int:
         items = await self._fetch(f"/auto/categories/{category_id}/driverTypes")
@@ -135,10 +222,20 @@ class DictionaryResolver:
                 self._fetch_locks[path] = lock
             return lock
 
-    def _match(self, items: list[DictionaryItem], name: str, *, what: str) -> int:
+    def _match(
+        self,
+        items: list[DictionaryItem],
+        name: str,
+        *,
+        what: str,
+        aliases: dict[str, str] | None = None,
+    ) -> int:
         """Return the id whose label matches ``name`` (case-insensitive).
 
-        Raises :class:`AutoRiaLookupError` (with candidates) on miss or ambiguity.
+        Three tiers, each only tried if the previous misses: (1) exact normalized
+        match; (2) English/transliterated alias → exact match; (3) homoglyph-folded
+        match (catches RIA's mixed Latin/Cyrillic labels). Raises
+        :class:`AutoRiaLookupError` (with candidates) on miss or ambiguity.
         """
         target = _normalize(name)
         exact = [item for item in items if _normalize(item.name) == target]
@@ -148,18 +245,70 @@ class DictionaryResolver:
             raise AutoRiaLookupError(
                 f"{what} '{name}' is ambiguous; matches: {self._format(exact)}"
             )
+
+        # Tiers 2+3: translate an English alias, then compare with homoglyphs
+        # folded so a Cyrillic/Latin mismatch (or an alias target) still lands.
+        wanted = {_fold(target)}
+        if aliases and target in aliases:
+            wanted.add(_fold(aliases[target]))
+        folded = [item for item in items if _fold(item.name) in wanted]
+        by_id = {item.id: item for item in folded}
+        if len(by_id) == 1:
+            return next(iter(by_id.values())).id
+        if len(by_id) > 1:
+            raise AutoRiaLookupError(
+                f"{what} '{name}' is ambiguous; matches: {self._format(list(by_id.values()))}"
+            )
         raise AutoRiaLookupError(
-            f"unknown {what} '{name}'. Closest matches: {self._candidates(items, name)}"
+            f"unknown {what} '{name}'. Closest matches: {self._candidates(items, name, aliases)}"
         )
 
-    def _candidates(self, items: list[DictionaryItem], name: str) -> str:
-        names = [item.name for item in items]
-        close = difflib.get_close_matches(name, names, n=_MAX_CANDIDATES, cutoff=0.4)
-        if not close:
+    def _candidates(
+        self,
+        items: list[DictionaryItem],
+        name: str,
+        aliases: dict[str, str] | None = None,
+    ) -> str:
+        """Rank near-matches against the folded label set.
+
+        Seeds suggestions from the aliases — both an exact hit and a *fuzzy* match
+        against the alias keys — so a misspelt English transliteration (``"Dizel"``)
+        still surfaces the intended localized option (``Дизель``) first, instead of
+        difflib ranking the Cyrillic label poorly against a Latin-script typo.
+        """
+        target = _normalize(name)
+        folded_to_item: dict[str, DictionaryItem] = {}
+        for item in items:  # first label wins for a given folded form
+            folded_to_item.setdefault(_fold(item.name), item)
+
+        ordered: list[DictionaryItem] = []
+        seen: set[int] = set()
+
+        def _add(item: DictionaryItem) -> None:
+            if item.id not in seen:
+                seen.add(item.id)
+                ordered.append(item)
+
+        # Alias-driven seeds: an exact alias plus alias KEYS close to the input
+        # ("dizel" ~ "diesel"). The targets are real labels, so map them directly.
+        if aliases:
+            keys = [target] if target in aliases else []
+            keys += difflib.get_close_matches(target, list(aliases), n=_MAX_CANDIDATES, cutoff=0.6)
+            for key in keys:
+                seed = folded_to_item.get(_fold(aliases[key]))
+                if seed is not None:
+                    _add(seed)
+
+        # Then fuzzy-match the input itself against the (homoglyph-folded) labels.
+        for hit in difflib.get_close_matches(
+            _fold(target), list(folded_to_item), n=_MAX_CANDIDATES, cutoff=0.4
+        ):
+            _add(folded_to_item[hit])
+
+        if not ordered:
             # Nothing similar — show the first few options so the agent sees the shape.
             return self._format(items[:_MAX_CANDIDATES]) or "(none)"
-        by_name = {item.name: item for item in items}
-        return self._format([by_name[n] for n in close])
+        return self._format(ordered[:_MAX_CANDIDATES])
 
     @staticmethod
     def _format(items: list[DictionaryItem]) -> str:

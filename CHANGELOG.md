@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-08
+
+Agent-facing correctness, data-richness, and efficiency overhaul, driven by real
+multi-turn agent sessions that produced wrong answers or forced heavy
+workarounds. Almost entirely additive (new fields, params, and tools). The one
+breaking response-contract change is the removal of the `search_url` field from
+`search_used_cars` results (see **Changed** below) — acceptable under a pre-1.0
+minor bump, but call it out when upgrading.
+
+### Added
+
+- **`get_car_details_batch(auto_ids)`** — fetch up to 50 listings in one call
+  (deduped, order-preserving, concurrency-bounded); a dead id returns a sparse
+  entry instead of failing the whole batch.
+- **Labelled + structured `get_car_details` fields** — every dictionary attribute
+  now ships as both id and label (`body_id`+`body_name`, `fuel_id`+`fuel`,
+  `gearbox_id`+`gearbox`+`gearbox_class`, `drive_id`+`drive`); engine
+  displacement/power are lifted out of free-text into `engine_volume_l`,
+  `engine_volume_class` (nominal), and `power_hp`.
+- **Due-diligence provenance on `get_car_details`** — `condition` (1–4 severity),
+  the `risk` block (damaged / for_parts / under_credit / confiscated / imported /
+  needs_customs), `verification` (VIN/inspection), `seller` trust, `photo` links,
+  plus `is_sold`/`sold_date`/`is_leasing`/`price_negotiable`/`exchange_possible`
+  and the seller `description`.
+- **New `search_used_cars` filters** — `engine_volume_from`/`_to` (litres),
+  `power_hp_from`/`_to`, `generation_id[]`, `modification_id[]` (previously
+  reachable only via `raw_search`); plus engine-volume filters on the
+  average-price tools.
+- **Reliability metadata on `get_average_price`** — `avg_price_usd`/`_uah`
+  (AUTO.RIA's AI estimate, labelled as such), `sample_count`,
+  `sample_min`/`median`/`max_usd`, a `price_consistency` flag that trips when the
+  headline falls outside its own comparables, `cohort`, `period`, `status`, and
+  `quota`; plus an `include_samples` flag for a lighter stats-only response.
+- **English/transliterated filter aliases** (`Diesel`→`Дизель`, `wagon`→
+  `Унiверсал`, `automatic`→`Автомат`, …) with Latin/Cyrillic homoglyph folding,
+  and near-miss suggestions that rank the right localized option first.
+- **Named `order_by`** values (`price_asc`, `year_desc`, …) alongside legacy ints.
+
+### Changed
+
+- **Removed `search_url`** from `search_used_cars`. The Public API mandates no
+  attribution backlink and returns only ids + count; the field was a server
+  invention that reproduced a broader query than was run and was modelled on the
+  front-end site, not the API. Per-listing URLs still come from `get_car_details`.
+- **`raw_search` is compact by default** (`{count, page, page_size, ids}`,
+  OfferOfTheDay filtered); pass `verbose=True` for the full raw payload.
+- **Server instructions** reframed around the resolve → search → details → price
+  workflow and a "seller-declared, verify `risk`/`condition`" posture.
+
+### Fixed
+
+- **`search_used_cars` count no longer includes new cars.** The query now sends
+  `searchType=4` (used-only) instead of `1`; the default search mixed NEW autos
+  into the results, inflating the reported `count` even though the `ids` were
+  used-only. Verified live against the API (a brand query dropped from 19,688 to
+  19,598). Response shape and OfferOfTheDay filtering are unchanged.
+
+### Notes
+
+- `get_average_price` reliability fields describe the visible sample only — the
+  API exposes no population distribution, so no percentiles are fabricated.
+
 ## [0.1.1] - 2026-06-06
 
 Docs/registry-only release — no tool, resource, or API changes.
@@ -69,6 +131,7 @@ backed by a typed async client, tiered caching, and an OIDC release pipeline.
   audit trail, README (config + tool catalog + quota guidance + known
   limitations), runnable `examples/`, `CONTRIBUTING.md`, and `SECURITY.md`.
 
-[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yevhen-kalyna/autoria-mcp/releases/tag/v0.1.0

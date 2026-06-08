@@ -6,6 +6,7 @@
   "modelName": "3 Series",
   "modelNameEng": "3-series",
   "title": "BMW 3 Series",
+  "subCategoryName": "Седан",
   "USD": 32999,
   "EUR": 30438,
   "UAH": 1349659,
@@ -14,14 +15,45 @@
   "plateNumber": "HH 5377 AB",
   "linkToView": "/auto_bmw_3_series_36756951.html",
   "addDate": "2024-07-05 11:36:06",
+  "updateDate": "2024-07-08 09:12:00",
+  "expireDate": "2024-10-05 11:36:06",
+  "soldDate": "",
   "auctionPossible": false,
   "exchangePossible": true,
+  "exchangeType": "Ваша доплата",
+  "realtyExchange": false,
+  "isLeasing": 0,
+  "technicalChecked": false,
+  "verifiedByInspectionCenter": false,
+  "haveInfotechReport": true,
+  "agreeShowVIN": 1,
+  "infotechReport": { "vin": "WBA5V710xKFxxxx23" },
+  "checkedVin": { "isShow": false, "orderId": 0, "vin": "WBA5V710xKFxxxx23" },
+  "infoBarText": "Акція",
+  "badges": ["Акція"],
+  "withInfoBar": false,
   "userId": 10896536,
   "userPhoneData": { "phone": "(xxx) xxx xx xx" },
+  "vinSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+  "codedVin": { "iv": "0037541c7b3b9202437d5207e2221ad6", "text": "c7205f9d64b6" },
+  "secureKey": "91d3eaef0acdcaa0afabe8f0f4ae52b1",
+  "levelData": { "level": 138, "hotType": "", "label": 0, "period": 1 },
+  "dealer": {
+    "id": 3341,
+    "name": "AutoPlus UA ",
+    "type": "Компания",
+    "typeId": 2,
+    "verified": true,
+    "isReliable": true,
+    "link": "/dealers/autoplus-ua/3341"
+  },
   "photoData": {
-    "all": [556088531, 556104180, 556104181],
+    "all": [556088531, 556104180, 556104181, 556104182, 556104183],
     "count": 125,
-    "seoLinkM": "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182m.jpg"
+    "seoLinkB": "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182b.jpg",
+    "seoLinkF": "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182f.jpg",
+    "seoLinkM": "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182m.jpg",
+    "seoLinkSX": "https://cdn2.riastatic.com/photosnew/auto/photo/bmw_3-series__556104182sx.jpg"
   },
   "stateData": {
     "cityId": 12,
@@ -37,6 +69,14 @@
     "title": "Повністю непошкоджене",
     "annotation": "Пошкодження відсутні"
   },
+  "autoInfoBar": {
+    "abroad": false,
+    "confiscatedCar": false,
+    "custom": false,
+    "damage": false,
+    "onRepairParts": false,
+    "underCredit": false
+  },
   "autoData": {
     "autoId": 36756951,
     "categoryId": 1,
@@ -51,6 +91,7 @@
     "driveId": 1,
     "driveName": "Повний",
     "bodyId": 3,
+    "subCategoryNameEng": "sedan",
     "generationId": 6138,
     "generationName": "G20",
     "modificationId": 135908,
@@ -59,6 +100,7 @@
     "equipmentName": "Base",
     "statusId": 0,
     "isSold": false,
+    "description": "БЕЗ ТОРГУ 1000%. НАЙНИЖЧА ЦІНА В УКРАЇНІ. ОФІЦІЙНА МАШИНА, НЕ БИТА, ДИЗЕЛЬ НА ПОВНОМУ ПРИВОДІ. БЕЗ ЖОДНОГО ДТП. Оригінальний пробіг. Можливий обмін.",
     "mainCurrency": "USD"
   }
 }

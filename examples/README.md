@@ -66,10 +66,11 @@ pulling detail only for the listings it cares about (each call spends scarce quo
    numeric ids (cached for 7 days, so this costs quota only once). The curated
    `search_used_cars` does this resolution for you, so you can also skip straight to
    step 2 with plain names.
-2. **`search_used_cars`** — search by brand/model/region/year/price; returns advert
-   `ids`, a `count`, and a set-level `search_url` (a deep link back to auto.ria.com).
+2. **`search_used_cars`** — search by brand/model/region/year/price/engine-volume;
+   returns advert `ids` and a `count`.
 3. **`get_car_details`** — for each interesting id, fetch the compact listing (price,
-   year, mileage, VIN-if-shown, masked phone, and the canonical per-listing URL).
+   year, mileage, condition/risk provenance, VIN-if-shown, masked phone, and the
+   canonical per-listing URL). Use `get_car_details_batch` to look up many at once.
 4. **`get_average_price`** — *(paid; needs `AUTORIA_USER_ID`)* get AUTO.RIA's AI
    average price plus comparable listings to judge whether an asking price is fair.
 

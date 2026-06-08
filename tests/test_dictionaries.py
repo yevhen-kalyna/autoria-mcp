@@ -85,6 +85,56 @@ async def test_fuel_and_drive_resolve(settings: Settings) -> None:
 
 
 @respx.mock
+async def test_english_fuel_alias_resolves(settings: Settings) -> None:
+    """C: an English fuel name resolves to its localized id."""
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        assert await resolver.fuel_id("Diesel") == 2
+        assert await resolver.fuel_id("petrol") == 1
+        assert await resolver.fuel_id("Electric") == 6
+
+
+@respx.mock
+async def test_english_gearbox_alias_resolves(settings: Settings) -> None:
+    respx.get(f"{BASE}/auto/categories/1/gearboxes").mock(
+        return_value=httpx.Response(200, json=load_fixture("gearboxes"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        assert await resolver.gearbox_id("automatic") == 2
+        assert await resolver.gearbox_id("manual") == 1
+
+
+@respx.mock
+async def test_body_alias_and_homoglyph_resolve(settings: Settings) -> None:
+    """C: 'wagon' and Cyrillic 'Універсал' both match RIA's Latin-i 'Унiверсал'."""
+    respx.get(f"{BASE}/auto/categories/1/bodystyles").mock(
+        return_value=httpx.Response(200, json=load_fixture("bodystyles"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        assert await resolver.body_id("wagon") == 2
+        assert await resolver.body_id("Універсал") == 2  # Cyrillic і vs stored Latin i
+        assert await resolver.body_id("hatchback") == 4
+
+
+@respx.mock
+async def test_unknown_english_fuel_suggests_localized_first(settings: Settings) -> None:
+    """C: a near-miss English fuel surfaces the right localized option first."""
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        with pytest.raises(AutoRiaLookupError) as exc:
+            await resolver.fuel_id("Dizel")
+    assert "Дизель (id=2)" in str(exc.value)
+
+
+@respx.mock
 async def test_unknown_name_lists_candidates(settings: Settings) -> None:
     respx.get(f"{BASE}/auto/categories/1/marks").mock(
         return_value=httpx.Response(200, json=load_fixture("marks"))
