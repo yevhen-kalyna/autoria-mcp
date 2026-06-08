@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Agent-facing correctness, data-richness, and efficiency overhaul, driven by real
 multi-turn agent sessions that produced wrong answers or forced heavy
-workarounds. All changes are additive — the 0.1.x response contract is preserved
-(new fields, params, and tools only).
+workarounds. Almost entirely additive (new fields, params, and tools). The one
+breaking response-contract change is the removal of the `search_url` field from
+`search_used_cars` results (see **Changed** below) — acceptable under a pre-1.0
+minor bump, but call it out when upgrading.
 
 ### Added
 

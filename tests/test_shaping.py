@@ -150,6 +150,9 @@ def test_nominal_volume_class_rounds_to_buyer_figure() -> None:
     assert nominal_volume_class(1.97) == 2.0
     assert nominal_volume_class(1.56) == 1.6
     assert nominal_volume_class(1.46) == 1.5
+    # Half-up on .x5 ties (round() would give 1.4 / 2.0 here).
+    assert nominal_volume_class(1.45) == 1.5
+    assert nominal_volume_class(2.05) == 2.1
     assert nominal_volume_class(None) is None
 
 

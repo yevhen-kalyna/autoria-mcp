@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from autoria_mcp.models import (
@@ -79,11 +80,13 @@ def nominal_volume_class(volume: float | None) -> float | None:
 
     RIA stores the *measured* litres inconsistently (the same 2.0 TDI appears as
     ``2``/``1.97``; a 1.6 as ``1.56``/``1.58``). The nominal class is the figure
-    buyers actually filter on, so we expose both.
+    buyers actually filter on, so we expose both. Uses explicit half-up rounding
+    (not ``round()``, whose ties-to-even + float repr give surprising results on
+    ``.x5`` values, e.g. ``round(1.45, 1) == 1.4``).
     """
     if volume is None:
         return None
-    return round(volume, 1)
+    return float(Decimal(str(volume)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
 
 def parse_power_hp(text: Any) -> int | None:
