@@ -123,6 +123,24 @@ async def test_build_avg_price_params_includes_engine_volume(
 
 
 @respx.mock
+async def test_engine_volume_is_part_of_request_identity(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """Two different engine-volume ranges must yield different request params, so
+    they can never collide on one cached response (the reported identical-avg bug)."""
+    _mock_renault_megane()
+    rt = make_runtime(settings)
+    async with rt.client:
+        low = await build_avg_price_params(
+            rt, brand="Renault", model="Megane", engine_volume_from=1.4, engine_volume_to=1.6
+        )
+        high = await build_avg_price_params(
+            rt, brand="Renault", model="Megane", engine_volume_from=1.9, engine_volume_to=2.1
+        )
+    assert low["engineVolume"] != high["engineVolume"]
+
+
+@respx.mock
 async def test_get_average_price_by_params(settings: Settings, make_runtime: MakeRuntime) -> None:
     _mock_renault_megane()
     route = respx.post(AVG).mock(
@@ -137,9 +155,11 @@ async def test_get_average_price_by_params(settings: Settings, make_runtime: Mak
     assert result.similar_cars[0].city == "Рівне"
     # G/ISSUE-9/K: reliability + provenance metadata is attached to the result.
     assert result.avg_price_usd == 7415
+    assert result.cohort_estimate_usd == 7650  # comps' median, cohort-appropriate
     assert result.sample_count == 1
     assert result.price_consistency == "avg_below_sample"
-    assert result.status == "ok"
+    # One comp is too thin to trust as a fair value.
+    assert result.status == "insufficient_sample"
     assert result.cohort is not None and result.cohort["brandId"] == "62"
     assert result.quota is not None and "month_limit" in result.quota
     # The request body carries the JSON shape, not query params.

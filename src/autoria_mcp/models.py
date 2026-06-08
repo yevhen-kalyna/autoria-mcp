@@ -167,6 +167,9 @@ class CarDetails(AutoRiaModel):
     price_eur: int | None = None
     year: int | None = None
     mileage_km: int | None = None
+    # Display label only — merges type + volume inconsistently ("Дизель, 1.56 л."
+    # / "Дизель"). For logic use `fuel_id` and `engine_volume_l`/`engine_volume_class`,
+    # never this string.
     fuel: str | None = None
     fuel_id: int | None = None
     engine_volume_l: float | None = None
@@ -231,17 +234,24 @@ class StatisticDatum(AutoRiaModel):
 class AveragePriceResult(AutoRiaModel):
     """Point-in-time average price plus the comparable listings it derives from.
 
-    The headline ``avg_price_*`` is **AUTO.RIA's own AI estimate**, not a figure
-    we recompute. To make its reliability legible (the API exposes no population
-    distribution — only a small ``similar_cars`` sample), we add the sample size,
-    the sample's own USD spread, and a ``price_consistency`` flag that trips when
-    the headline falls outside the spread of the very comps it cites. ``cohort``
-    echoes the resolved filters and ``status`` distinguishes a real answer from
-    no/insufficient data.
+    The headline ``avg_price_*`` is **AUTO.RIA's own model-level AI estimate**, not
+    a figure we recompute — and it is only weakly sensitive to tight cohort filters
+    (``engine_volume``/``modification``), so it should not be read as an
+    engine-precise fair value. For that, prefer ``cohort_estimate_usd`` (the median
+    of the comparable listings). To make reliability legible (the API exposes no
+    population distribution — only a small ``similar_cars`` sample), we add the
+    sample size, the sample's own USD spread, and a ``price_consistency`` flag that
+    trips when the headline falls outside the spread of the very comps it cites.
+    ``status`` is ``insufficient_sample`` when the sample is too thin (< 5 comps) or
+    when a tight cohort was requested yet the headline ignored it. ``cohort`` echoes
+    the resolved filters.
     """
 
     avg_price_usd: int | None = None
     avg_price_uah: int | None = None
+    # Median of the comparable listings — the cohort-appropriate figure to prefer
+    # over the model-level ``avg_price_usd`` headline when a tight cohort was queried.
+    cohort_estimate_usd: int | None = None
     sample_count: int = 0
     sample_min_usd: int | None = None
     sample_median_usd: int | None = None

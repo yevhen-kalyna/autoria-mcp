@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-08
+
+Follow-up correctness fixes from a real agent session (Peugeot 508). The
+`get_average_price` headline was found, via a live A/B, to be a **model-level** AI
+estimate that does not honour tight cohort filters (two different `engine_volume`
+ranges returned an identical average); and hybrid fuel could not be searched in one
+call. Additive fields plus a more honest `status`; no params removed.
+
+### Added
+
+- **`cohort_estimate_usd` on `get_average_price`** — the median of the comparable
+  listings, surfaced as the cohort-appropriate figure to prefer over the
+  model-level `avg_price_usd` headline when a tight cohort was queried.
+- **One-call hybrid search** — `search_used_cars(fuel="Гібрид")` (or `"hybrid"`)
+  now expands to every hybrid subtype (HEV/PHEV/MHEV/REEV) via multiple `type[i]`
+  wire params, instead of erroring on ambiguity and forcing 3–4 separate queries.
+  A specific subtype (e.g. `"Гібрид (PHEV)"`) still resolves to one id. New
+  resolver method `DictionaryResolver.fuel_ids()`.
+
+### Changed
+
+- **`get_average_price` `status` is now demoted to `insufficient_sample`** when the
+  comparable sample is thin (< 5 listings) or when a narrowing cohort
+  (`engine_volume`/`modification`/`generation`) was requested yet the headline
+  falls outside its own comps — i.e. the model-level estimate ignored the cohort.
+- **Corrected `get_average_price` docs** — removed the misleading claim that
+  `engine_volume_from`/`_to` constrain the headline "to avoid mixing cohorts"; the
+  bounds narrow the comparable **sample**, not the model-level headline. Field and
+  docstring guidance now point at `cohort_estimate_usd` for cohort fair value.
+
+### Docs
+
+- Documented the `order_by="relevance"` default caveat (may bury cheapest/newest;
+  pass an explicit sort for an exhaustive sweep).
+- Marked `CarDetails.fuel` as a display label that merges type+volume
+  inconsistently — use `fuel_id` / `engine_volume_l` for logic.
+- Noted that Kyiv city and Kyiv oblast are distinct, region-scoped ids.
+
 ## [0.2.0] - 2026-06-08
 
 Agent-facing correctness, data-richness, and efficiency overhaul, driven by real
@@ -131,7 +169,8 @@ backed by a typed async client, tiered caching, and an OIDC release pipeline.
   audit trail, README (config + tool catalog + quota guidance + known
   limitations), runnable `examples/`, `CONTRIBUTING.md`, and `SECURITY.md`.
 
-[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yevhen-kalyna/autoria-mcp/releases/tag/v0.1.0

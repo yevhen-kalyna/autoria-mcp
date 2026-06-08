@@ -71,6 +71,12 @@ _FUEL_ALIASES: dict[str, str] = {
     "lpg": "газ пропан-бутан / бензин",
     "cng": "газ метан / бензин",
 }
+# Group fuel terms that expand to several subtype ids (so one search can cover
+# them). Maps a normalized input term -> the folded name-prefix its members share.
+_FUEL_GROUP_PREFIXES: dict[str, str] = {
+    "гібрид": "гібрид",
+    "hybrid": "гібрид",
+}
 _GEARBOX_ALIASES: dict[str, str] = {
     "manual": "ручна / механіка",
     "mt": "ручна / механіка",
@@ -172,6 +178,21 @@ class DictionaryResolver:
     async def fuel_id(self, name: str) -> int:
         items = await self._fetch("/auto/type")
         return self._match(items, name, what="fuel type", aliases=_FUEL_ALIASES)
+
+    async def fuel_ids(self, name: str) -> list[int]:
+        """Resolve a fuel name to one or more ids.
+
+        A group term ("Гібрид"/"hybrid", no subtype) expands to every subtype id so
+        a single search covers them all; any specific name resolves to one id.
+        """
+        items = await self._fetch("/auto/type")
+        prefix = _FUEL_GROUP_PREFIXES.get(_normalize(name))
+        if prefix is not None:
+            folded = _fold(prefix)
+            group = sorted({item.id for item in items if _fold(item.name).startswith(folded)})
+            if group:
+                return group
+        return [self._match(items, name, what="fuel type", aliases=_FUEL_ALIASES)]
 
     async def body_id(self, name: str, *, category_id: int = _DEFAULT_CATEGORY) -> int:
         items = await self._fetch(f"/auto/categories/{category_id}/bodystyles")

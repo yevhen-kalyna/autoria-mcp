@@ -113,6 +113,37 @@ async def test_build_search_query_maps_to_v1_wire_names(
     assert resolved == {"category_id": 1, "marka_id": 9, "model_id": 3219}
 
 
+@respx.mock
+async def test_search_hybrid_fuel_emits_multiple_type_params(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """fuel='Гібрид' fans out to type[0..3] in one wire query (all hybrid subtypes)."""
+    _mock_brand_model()
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    rt = make_runtime(settings)
+    async with rt.client:
+        wire, _ = await build_search_query(rt, brand="BMW", fuel="Гібрид")
+    type_values = sorted(v for k, v in wire.items() if k.startswith("type["))
+    assert type_values == [5, 10, 11, 12]
+
+
+@respx.mock
+async def test_search_single_fuel_emits_one_type_param(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    _mock_brand_model()
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    rt = make_runtime(settings)
+    async with rt.client:
+        wire, _ = await build_search_query(rt, brand="BMW", fuel="Дизель")
+    assert wire["type[0]"] == 2
+    assert "type[1]" not in wire
+
+
 async def test_search_model_without_brand_raises(
     settings: Settings, make_runtime: MakeRuntime
 ) -> None:
