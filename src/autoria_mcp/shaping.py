@@ -5,31 +5,33 @@ fields lifted out of RIA's deeply nested, mixed-language payloads, plus the
 mandatory ``auto.ria.com`` attribution link. All of that flattening lives here
 as pure functions so it can be unit-tested without the network or the MCP layer.
 
-Two URL forms, both deliberate:
-  * :func:`listing_url` — prefixes the *guaranteed* ``linkToView``/``uri`` slug
-    that ``/auto/info`` and the paid endpoints return. This is the canonical
-    per-listing deep link.
-  * :func:`web_search_url` — reconstructs the auto.ria.com web *search* URL from
-    the resolved query (the web param vocabulary, mirroring the VIN endpoint's
-    ``link.url``). Search returns only ids, so this set-level link is how the
-    search tool satisfies the attribution requirement; it is always valid even
-    when only some filters are mappable.
+:func:`listing_url` prefixes the *guaranteed* ``linkToView``/``uri`` slug that
+``/auto/info`` and the paid endpoints return — the canonical per-listing deep
+link. The Public API mandates no set-level attribution link and search returns
+only ids + a count, so the search result carries no invented search URL.
 """
 
 from __future__ import annotations
 
+import re
+import statistics
 from typing import Any
 
 from autoria_mcp.models import (
     AveragePriceResult,
     CarDetails,
+    Condition,
     GraphPoint,
+    PhotoLinks,
+    RiskFlags,
     SearchResult,
+    SellerInfo,
     SimilarCar,
     StatisticDatum,
     StatisticSeries,
     VinChip,
     VinParams,
+    VinVerification,
 )
 
 AUTO_RIA = "https://auto.ria.com"
@@ -54,6 +56,58 @@ def _thousands_km(race_int: Any) -> int | None:
     return race_int * 1000
 
 
+# Engine displacement lives only inside RIA's free-text ``fuelName`` ("Дизель,
+# 2 л.", "Бензин, 1.97 л.") and power only inside ``modificationName`` ("320d
+# Steptronic (190 к.с.) xDrive"). Agents otherwise have to regex these out of a
+# localized string, so we lift structured numbers here.
+_VOLUME_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*л\b")
+_POWER_RE = re.compile(r"(\d+)\s*(?:к\.?\s?с|л\.?\s?с)\.?", re.IGNORECASE)
+
+
+def parse_engine_volume(text: Any) -> float | None:
+    """Extract litres from a label like ``"Дизель, 1.97 л."`` → ``1.97``."""
+    if not isinstance(text, str):
+        return None
+    match = _VOLUME_RE.search(text)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", "."))
+
+
+def nominal_volume_class(volume: float | None) -> float | None:
+    """Round a measured displacement to its nominal class (1.97 → 2.0, 1.56 → 1.6).
+
+    RIA stores the *measured* litres inconsistently (the same 2.0 TDI appears as
+    ``2``/``1.97``; a 1.6 as ``1.56``/``1.58``). The nominal class is the figure
+    buyers actually filter on, so we expose both.
+    """
+    if volume is None:
+        return None
+    return round(volume, 1)
+
+
+def parse_power_hp(text: Any) -> int | None:
+    """Extract horsepower from a label like ``"... (190 к.с.) xDrive"`` → ``190``."""
+    if not isinstance(text, str):
+        return None
+    match = _POWER_RE.search(text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def price_to_int(value: Any) -> int | None:
+    """Parse a RIA price into an int (``"7 650"`` → ``7650``; spaces/nbsp stripped)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        digits = re.sub(r"\D", "", value)
+        return int(digits) if digits else None
+    return None
+
+
 def listing_url(link_to_view: str | None) -> str | None:
     """Prefix a relative ``linkToView``/``uri`` slug with the auto.ria.com host."""
     if not link_to_view:
@@ -61,31 +115,6 @@ def listing_url(link_to_view: str | None) -> str | None:
     if link_to_view.startswith("http://") or link_to_view.startswith("https://"):
         return link_to_view
     return f"{AUTO_RIA}{link_to_view}"
-
-
-def web_search_url(resolved: dict[str, Any]) -> str:
-    """Build the canonical auto.ria.com web *search* URL from resolved IDs.
-
-    Uses the web param vocabulary (``categories.main.id``, ``brand.id[0]``,
-    ``model.id[0]``, ``region.id[0]``) seen in the VIN endpoint's ``link.url``.
-    Only the dimensions that map cleanly are included; the result is always a
-    valid auto.ria.com search link (so it satisfies attribution) even if finer
-    filters (price/year/mileage) are applied via the API but not mirrored here.
-    """
-    parts = ["indexName=auto,order_auto,newauto_search"]
-    category_id = resolved.get("category_id")
-    if category_id is not None:
-        parts.append(f"categories.main.id={category_id}")
-    marka_id = resolved.get("marka_id")
-    if marka_id is not None:
-        parts.append(f"brand.id[0]={marka_id}")
-    model_id = resolved.get("model_id")
-    if model_id is not None:
-        parts.append(f"model.id[0]={model_id}")
-    state_id = resolved.get("state_id")
-    if state_id is not None:
-        parts.append(f"region.id[0]={state_id}")
-    return f"{AUTO_RIA}/uk/search/?{'&'.join(parts)}"
 
 
 def keep_used_autos(data: Any) -> list[str]:
@@ -120,7 +149,7 @@ def cleaned_params(raw: Any) -> dict[str, Any]:
     return cleaned if isinstance(cleaned, dict) else {}
 
 
-def shape_search(raw: Any, *, page: int, page_size: int, search_url: str) -> SearchResult:
+def shape_search(raw: Any, *, page: int, page_size: int) -> SearchResult:
     """Flatten a ``/auto/search`` response into a :class:`SearchResult`."""
     result = raw.get("result") if isinstance(raw, dict) else None
     result = result if isinstance(result, dict) else {}
@@ -151,37 +180,167 @@ def shape_search(raw: Any, *, page: int, page_size: int, search_url: str) -> Sea
         page=page,
         page_size=page_size,
         ids=ids,
-        search_url=search_url,
+    )
+
+
+# Sellers tag the same physical transmission inconsistently (a DCT shows up as
+# Автомат / Робот / Типтронік). The canonical class lets an agent group and
+# compare without losing the raw label.
+_GEARBOX_CLASS: dict[str, str] = {
+    "ручна / механіка": "manual",
+    "автомат": "automatic",
+    "типтронік": "automatic",
+    "робот": "automatic",
+    "варіатор": "cvt",
+}
+
+
+def canonical_gearbox(name: Any) -> str | None:
+    """Map a RIA gearbox label to a canonical class (manual/automatic/cvt)."""
+    if not isinstance(name, str):
+        return None
+    return _GEARBOX_CLASS.get(name.strip().casefold())
+
+
+def _opt_bool(value: Any) -> bool | None:
+    """Coerce RIA's mixed bool/int flags (``isLeasing: 0``) to ``bool`` or ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    return None
+
+
+def _condition(raw: dict[str, Any]) -> Condition | None:
+    tc = raw.get("technicalCondition")
+    if not isinstance(tc, dict):
+        return None
+    return Condition(id=tc.get("id"), title=tc.get("title"), note=tc.get("annotation"))
+
+
+def _risk(raw: dict[str, Any]) -> RiskFlags | None:
+    bar = raw.get("autoInfoBar")
+    if not isinstance(bar, dict):
+        return None
+    return RiskFlags(
+        damaged=bar.get("damage"),
+        for_parts=bar.get("onRepairParts"),
+        confiscated=bar.get("confiscatedCar"),
+        under_credit=bar.get("underCredit"),
+        imported=bar.get("abroad"),
+        needs_customs=bar.get("custom"),
+    )
+
+
+def _verification(raw: dict[str, Any]) -> VinVerification:
+    return VinVerification(
+        vin_shown=_dig(raw, "checkedVin", "isShow"),
+        has_history_report=raw.get("haveInfotechReport"),
+        inspection_verified=raw.get("verifiedByInspectionCenter"),
+        technical_checked=raw.get("technicalChecked"),
+    )
+
+
+def _clean_str(value: Any) -> str | None:
+    """Trim a string, returning ``None`` for empty/blank (RIA sends ``""`` a lot)."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def _seller(raw: dict[str, Any]) -> SellerInfo:
+    # RIA returns a dealer object even for private sellers, with blank strings —
+    # so a missing OR empty type both mean "private", never a bare "".
+    dealer = raw.get("dealer")
+    dealer = dealer if isinstance(dealer, dict) else {}
+    return SellerInfo(
+        type=_clean_str(dealer.get("type")) or "private",
+        name=_clean_str(dealer.get("name")),
+        verified=dealer.get("verified"),
+        reliable=dealer.get("isReliable"),
+    )
+
+
+def _photo(raw: dict[str, Any]) -> PhotoLinks | None:
+    data = raw.get("photoData")
+    if not isinstance(data, dict):
+        return None
+    return PhotoLinks(
+        count=data.get("count"),
+        b=data.get("seoLinkB"),
+        f=data.get("seoLinkF"),
+        m=data.get("seoLinkM"),
+        sx=data.get("seoLinkSX"),
     )
 
 
 def shape_car_details(raw: Any) -> CarDetails:
-    """Flatten a ``/auto/info`` payload into a compact :class:`CarDetails`."""
-    auto = raw.get("autoData") if isinstance(raw, dict) else None
+    """Flatten a ``/auto/info`` payload into a compact :class:`CarDetails`.
+
+    Every dictionary attribute is returned as an id **and** a human label
+    (``body_id``/``body_name``, ``fuel_id``/``fuel``, ...) so an agent never has
+    to reverse an opaque integer; displacement and power are lifted out of RIA's
+    free-text strings into structured numbers while the raw labels are kept.
+
+    Provenance the API carries but a bare-scalar shape would drop is surfaced
+    too: ``condition`` (1–4 severity), the ``risk`` red-flag block (damaged /
+    for-parts / under-credit / confiscated / imported / customs), VIN/inspection
+    ``verification``, ``seller`` trust, and ``photo`` links. ``mileage_km`` and
+    the prices remain **seller-declared and unverified**.
+    """
+    src = raw if isinstance(raw, dict) else {}
+    auto = src.get("autoData")
     auto = auto if isinstance(auto, dict) else {}
+
+    fuel_label = auto.get("fuelName")
+    engine_volume_l = parse_engine_volume(fuel_label)
 
     return CarDetails(
         id=auto.get("autoId"),
-        title=raw.get("title") if isinstance(raw, dict) else None,
-        brand=raw.get("markName") if isinstance(raw, dict) else None,
-        model=raw.get("modelName") if isinstance(raw, dict) else None,
-        price_usd=raw.get("USD") if isinstance(raw, dict) else None,
-        price_uah=raw.get("UAH") if isinstance(raw, dict) else None,
-        price_eur=raw.get("EUR") if isinstance(raw, dict) else None,
+        title=src.get("title"),
+        brand=src.get("markName"),
+        model=src.get("modelName"),
+        price_usd=src.get("USD"),
+        price_uah=src.get("UAH"),
+        price_eur=src.get("EUR"),
         year=auto.get("year"),
         mileage_km=_thousands_km(auto.get("raceInt")),
-        fuel=auto.get("fuelName"),
+        fuel=fuel_label,
+        fuel_id=auto.get("fuelId"),
+        engine_volume_l=engine_volume_l,
+        engine_volume_class=nominal_volume_class(engine_volume_l),
+        power_hp=parse_power_hp(auto.get("modificationName")),
         gearbox=auto.get("gearboxName"),
+        gearbox_id=auto.get("gearBoxId"),
+        gearbox_class=canonical_gearbox(auto.get("gearboxName")),
         drive=auto.get("driveName"),
+        drive_id=auto.get("driveId"),
         body_id=auto.get("bodyId"),
+        body_name=src.get("subCategoryName"),
         generation=auto.get("generationName"),
         modification=auto.get("modificationName"),
         color=_dig(raw, "color", "name"),
         city=_dig(raw, "stateData", "name"),
         region=_dig(raw, "stateData", "regionName"),
-        vin=(raw.get("VIN") or None) if isinstance(raw, dict) else None,
+        vin=(src.get("VIN") or None),
         phone=_dig(raw, "userPhoneData", "phone"),
-        url=listing_url(raw.get("linkToView") if isinstance(raw, dict) else None),
+        url=listing_url(src.get("linkToView")),
+        condition=_condition(src),
+        risk=_risk(src),
+        verification=_verification(src),
+        seller=_seller(src),
+        photo=_photo(src),
+        is_sold=auto.get("isSold"),
+        sold_date=(src.get("soldDate") or None),
+        is_leasing=_opt_bool(src.get("isLeasing")),
+        listed_date=src.get("addDate"),
+        updated_date=src.get("updateDate"),
+        price_negotiable=src.get("auctionPossible"),
+        exchange_possible=src.get("exchangePossible"),
+        description=auto.get("description"),
     )
 
 
@@ -201,8 +360,26 @@ def _shape_similar_car(entry: Any) -> SimilarCar:
     )
 
 
-def shape_average_price(raw: Any) -> AveragePriceResult:
-    """Flatten a ``/auto/ai-avarage-price/`` response."""
+def _avg_price_block(statistic_data: list[StatisticDatum]) -> StatisticDatum | None:
+    """Return RIA's headline ``avgPrice`` block from the statistic data, if any."""
+    for datum in statistic_data:
+        if datum.type == "avgPrice" or (datum.id or "").startswith("avgPrice"):
+            return datum
+    return None
+
+
+def shape_average_price(
+    raw: Any, *, cohort: dict[str, Any] | None = None, period: int | None = None
+) -> AveragePriceResult:
+    """Flatten a ``/auto/ai-avarage-price/`` response and annotate its reliability.
+
+    The headline ``avg_price_*`` is RIA's AI estimate, surfaced verbatim. The API
+    exposes no population distribution, only a small ``similar_cars`` sample, so
+    we add the sample size + the sample's own USD spread and a ``price_consistency``
+    flag that trips when the headline sits outside that spread — the exact
+    contradiction agents otherwise surface as authoritative. ``cohort``/``period``
+    echo what was actually queried.
+    """
     similar = raw.get("similarCars") if isinstance(raw, dict) else None
     stats = raw.get("statisticData") if isinstance(raw, dict) else None
 
@@ -218,11 +395,56 @@ def shape_average_price(raw: Any) -> AveragePriceResult:
         for s in (stats if isinstance(stats, list) else [])
         if isinstance(s, dict)
     ]
-    return AveragePriceResult(similar_cars=similar_cars, statistic_data=statistic_data)
+
+    avg_block = _avg_price_block(statistic_data)
+    avg_price_usd = avg_block.price_usd if avg_block else None
+    avg_price_uah = avg_block.price_uah if avg_block else None
+
+    sample_usd = [p for c in similar_cars if (p := price_to_int(c.price_usd)) is not None]
+    sample_min = min(sample_usd) if sample_usd else None
+    sample_max = max(sample_usd) if sample_usd else None
+    sample_median = round(statistics.median(sample_usd)) if sample_usd else None
+
+    price_consistency: str | None = None
+    if avg_price_usd is not None and sample_min is not None and sample_max is not None:
+        if avg_price_usd < sample_min:
+            price_consistency = "avg_below_sample"
+        elif avg_price_usd > sample_max:
+            price_consistency = "avg_above_sample"
+        else:
+            price_consistency = "ok"
+
+    if not statistic_data and not similar_cars:
+        status = "no_data"
+    elif avg_price_usd is None and avg_price_uah is None:
+        status = "insufficient_sample"  # comparable listings but no average estimate
+    else:
+        status = "ok"
+
+    return AveragePriceResult(
+        avg_price_usd=avg_price_usd,
+        avg_price_uah=avg_price_uah,
+        sample_count=len(similar_cars),
+        sample_min_usd=sample_min,
+        sample_median_usd=sample_median,
+        sample_max_usd=sample_max,
+        price_consistency=price_consistency,
+        cohort=cohort,
+        period=period,
+        status=status,
+        similar_cars=similar_cars,
+        statistic_data=statistic_data,
+    )
 
 
-def shape_statistic(raw: Any) -> StatisticSeries:
-    """Flatten a ``/auto/statistic-avarage-price/`` response."""
+def shape_statistic(
+    raw: Any, *, cohort: dict[str, Any] | None = None, period: int | None = None
+) -> StatisticSeries:
+    """Flatten a ``/auto/statistic-avarage-price/`` response.
+
+    ``cohort``/``period`` echo what was queried; ``status`` is ``no_data`` when
+    the series came back empty so the agent can widen or inform the user.
+    """
     graph = raw.get("graphData") if isinstance(raw, dict) else None
     graph_data = [
         GraphPoint(
@@ -235,11 +457,14 @@ def shape_statistic(raw: Any) -> StatisticSeries:
         if isinstance(g, dict)
     ]
     notice = raw.get("noticeData") if isinstance(raw, dict) else None
-    period = raw.get("periodSelectorData") if isinstance(raw, dict) else None
+    period_selector = raw.get("periodSelectorData") if isinstance(raw, dict) else None
     return StatisticSeries(
         graph_data=graph_data,
-        period_selector=period if isinstance(period, dict) else None,
+        period_selector=period_selector if isinstance(period_selector, dict) else None,
         notice=notice if isinstance(notice, list) else [],
+        cohort=cohort,
+        period=period,
+        status="ok" if graph_data else "no_data",
     )
 
 

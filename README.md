@@ -12,10 +12,10 @@ An [MCP](https://modelcontextprotocol.io) server that exposes the
 agents — programmatic, agent-friendly access to the Ukrainian used-car market
 through the sanctioned API, no scraping.
 
-The full tool surface is live — **29 tools, 7 dictionary resources, and 1
-templated resource**: curated search/lookup tools, paid statistics tools, thin
-endpoint mirrors, and browsable dictionary resources, all backed by tiered
-caching and a typed async client.
+The full tool surface is live — **30 tools, 7 dictionary resources, and 1
+templated resource**: curated search/lookup tools (single and batch listing
+details), paid statistics tools, thin endpoint mirrors, and browsable dictionary
+resources, all backed by tiered caching and a typed async client.
 
 ## Features
 
@@ -291,8 +291,9 @@ re-fetched needlessly.
 
 | Tool                | Description                                                              |
 | ------------------- | ----------------------------------------------------------------------- |
-| `search_used_cars`  | Search listings by brand/model/region/year/price/etc.; returns ids + a canonical `search_url`. |
-| `get_car_details`   | Compact details for one advert id (price, year, mileage, VIN-if-shown, masked phone, URL). |
+| `search_used_cars`  | Search by brand/model/region/year/price/engine-volume/power/generation/etc.; returns the match `count` + advert ids. |
+| `get_car_details`   | Compact details for one advert id: price, year, mileage, structured engine volume/power, labelled body/fuel/gearbox, plus `condition`/`risk`/`verification`/`seller`/`photo` provenance, VIN-if-shown, masked phone, URL. |
+| `get_car_details_batch` | Details for up to 50 advert ids in one call (deduped; a dead id returns a sparse entry). |
 | `lookup_brands`     | List passenger-car brands, or resolve one brand name to its id.         |
 | `lookup_models`     | List a brand's models, or resolve one model name to its id.             |
 | `lookup_regions`    | List regions (oblasts), or resolve one region name to its id.           |
@@ -311,7 +312,8 @@ re-fetched needlessly.
 `list_modifications_by_body`, `list_equipment`, `list_options`, `list_options_v2`,
 `list_colors`, `list_countries`, `list_drive_types`, `list_fuel_types`,
 `list_gearboxes`, `list_body_styles`, `list_body_styles_grouped`,
-`list_all_body_styles`, `list_bodies_by_generation`, and `raw_search` (raw V1 search).
+`list_all_body_styles`, `list_bodies_by_generation`, and `raw_search` (raw V1
+search; compact `{count, ids}` by default, `verbose=True` for the full payload).
 
 **Resources**: `autoria://dict/{categories,colors,countries,fuel-types,gearboxes,
 body-styles,states}` and the templated `autoria://dict/models/{categoryId}/{markId}`.
@@ -321,11 +323,10 @@ body-styles,states}` and the templated `autoria://dict/models/{categoryId}/{mark
 ## Attribution
 
 AUTO.RIA's API terms require a **visible link back to `auto.ria.com`** wherever you
-display data sourced from the API. Every tool that returns listings honours this
-for you: `get_car_details` and the paid endpoints include a canonical per-listing
-deep link, and `search_used_cars` returns a set-level `search_url` (search itself
-returns only ids). Keep these links visible in whatever surface presents the
-results to an end user.
+display data sourced from the API. `get_car_details` and the paid endpoints include
+a canonical per-listing deep link (`url`); keep it visible in whatever surface
+presents a listing to an end user. (`search_used_cars` returns only ids + a count —
+the Public API specifies no set-level search link, so none is invented.)
 
 ## Known limitations
 
@@ -335,9 +336,9 @@ These are deliberate scope/behaviour choices worth knowing before you rely on th
   modelled by `search_used_cars`. For OR-style queries across several brands, drop
   to `raw_search` and pass the raw V1 params yourself.
 - **Search returns ids, not full listings.** `search_used_cars` gives you advert
-  ids, a `count`, and a set-level `search_url`. Fetch per-listing detail (price,
-  year, mileage, URL, masked phone) with `get_car_details` for each id you care
-  about — each call spends quota, so resolve only what you need.
+  ids and a `count`. Fetch per-listing detail with `get_car_details` (or
+  `get_car_details_batch` for a whole page of ids) — each lookup spends quota, so
+  resolve only what you need.
 - **Search is V1-only and silently ignores unknown params** — a genuine footgun.
   The underlying `/auto/search` endpoint does not validate filter keys: a misspelt
   or unsupported param is dropped, and the search quietly widens to the whole site

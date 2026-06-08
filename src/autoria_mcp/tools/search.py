@@ -3,16 +3,19 @@
 Takes human-friendly inputs (brand/model/region names, year/price/mileage
 ranges), resolves them to AUTO.RIA's **V1** numeric wire params via the shared
 dictionary resolver, and makes exactly **one** ``/auto/search`` call. It returns
-ids only (no auto-enrichment) plus a set-level attribution ``search_url``; the
-agent drills into a specific id with ``get_car_details``.
+the total match ``count`` and the matching ids only (no auto-enrichment); the
+agent drills into a specific id with ``get_car_details`` for its details and URL.
 
-Two verified foot-guns are handled here:
+Three verified foot-guns are handled here:
   * **V1-only vocabulary.** ``/auto/search`` honors V1 names (``marka_id``,
     ``bodystyle``, ``type`` for fuel, ...); V3 names are silently ignored and the
     endpoint returns the entire site. After the call we sanity-check the echoed
     ``cleaned.marka_id`` whenever a brand was requested.
-  * **OfferOfTheDay.** RIA injects a promo advert (id ``100500``) into the
-    results; we keep only ``type == "UsedAuto"`` entries.
+  * **New-auto contamination.** The default search mixes NEW cars into the
+    results, inflating ``count``. We send ``searchType=4`` (used only) so the
+    count is the true used-car total (verified live against the API).
+  * **OfferOfTheDay.** RIA still injects a promo advert (id ``100500``) into the
+    results even with ``searchType=4``; we keep only ``type == "UsedAuto"`` entries.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from autoria_mcp.cache import make_cache_key
 from autoria_mcp.client import AutoRiaError
 from autoria_mcp.models import SearchResult
 from autoria_mcp.runtime import RuntimeContext, get_runtime
-from autoria_mcp.shaping import cleaned_params, shape_search, web_search_url
+from autoria_mcp.shaping import cleaned_params, shape_search
 from autoria_mcp.tools._errors import tool_errors
 
 # v1 search is passenger-cars only; category 1 scopes the category-specific
@@ -37,6 +40,38 @@ _CURRENCY: dict[str, int] = {"USD": 1, "EUR": 2, "UAH": 3}
 
 Currency = Literal["USD", "EUR", "UAH"]
 SEARCH_PATH = "/auto/search"
+
+# Named sort orders, mapped to the V1 ``order_by`` magic numbers. Agents may pass
+# either the int or the name; a price-asc/price-desc slip silently flips
+# "cheapest" to "most expensive", so the names make intent explicit.
+_ORDER_BY_NAMES: dict[str, int] = {
+    "relevance": 0,
+    "price_asc": 2,
+    "price_desc": 3,
+    "year_desc": 5,  # newest first
+    "year_asc": 6,  # oldest first
+    "date_desc": 7,  # newest listing first
+    "date_asc": 8,  # oldest listing first
+    "mileage_desc": 12,
+    "mileage_asc": 13,
+}
+_ORDER_BY_VALUES = frozenset(_ORDER_BY_NAMES.values())
+
+
+def resolve_order_by(value: int | str) -> int:
+    """Coerce a named or numeric ``order_by`` to its V1 int, validating the input."""
+    if isinstance(value, bool):  # bool is an int subclass; reject explicitly
+        raise AutoRiaError("`order_by` must be a sort name or int, not a bool.")
+    if isinstance(value, int):
+        if value not in _ORDER_BY_VALUES:
+            allowed = ", ".join(str(v) for v in sorted(_ORDER_BY_VALUES))
+            raise AutoRiaError(f"`order_by` int must be one of {{{allowed}}}, got {value}.")
+        return value
+    key = value.strip().casefold()
+    if key not in _ORDER_BY_NAMES:
+        allowed = ", ".join(sorted(_ORDER_BY_NAMES))
+        raise AutoRiaError(f"unknown `order_by` '{value}'. Use one of: {allowed}.")
+    return _ORDER_BY_NAMES[key]
 
 
 async def build_search_query(
@@ -56,9 +91,15 @@ async def build_search_query(
     body: str | None = None,
     mileage_from: int | None = None,
     mileage_to: int | None = None,
+    engine_volume_from: float | None = None,
+    engine_volume_to: float | None = None,
+    power_hp_from: int | None = None,
+    power_hp_to: int | None = None,
+    generation_id: list[int] | None = None,
+    modification_id: list[int] | None = None,
     page: int = 0,
     page_size: int = 10,
-    order_by: int = 0,
+    order_by: int | str = 0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Resolve natural inputs to V1 wire params.
 
@@ -71,6 +112,8 @@ async def build_search_query(
     if city is not None and region is None:
         raise AutoRiaError("`city` requires `region` (resolve the city within its region).")
 
+    order_by_int = resolve_order_by(order_by)
+
     marka_id = await rt.resolver.brand_id(brand) if brand else None
     model_id = await rt.resolver.model_id(brand, model) if (brand and model) else None
     state_id = await rt.resolver.region_id(region) if region else None
@@ -81,10 +124,13 @@ async def build_search_query(
 
     wire: dict[str, Any] = {
         "category_id": _CATEGORY_ID,
-        "searchType": 1,
+        # searchType=4 = used cars only. The default mixes NEW autos into the
+        # results, which inflates `count` even though `keep_used_autos` filters
+        # the ids; with 4 the count is the true used-only total (verified live).
+        "searchType": 4,
         "countpage": page_size,
         "page": page,
-        "order_by": order_by,
+        "order_by": order_by_int,
         "currency": _CURRENCY[currency],
     }
     if marka_id is not None:
@@ -113,6 +159,24 @@ async def build_search_query(
         wire["price_ot"] = price_from
     if price_to is not None:
         wire["price_do"] = price_to
+    # Engine volume is litres as a decimal string; power is an int in к.с.
+    # (power_name=1). These were previously reachable only via raw_search.
+    if engine_volume_from is not None:
+        wire["engineVolumeFrom"] = str(engine_volume_from)
+    if engine_volume_to is not None:
+        wire["engineVolumeTo"] = str(engine_volume_to)
+    if power_hp_from is not None or power_hp_to is not None:
+        wire["power_name"] = 1  # 1 == к.с. (hp); 2 == kW
+        if power_hp_from is not None:
+            wire["powerFrom"] = power_hp_from
+        if power_hp_to is not None:
+            wire["powerTo"] = power_hp_to
+    # Generation uses a 2-level bracket index, modification a 3-level one; the
+    # outer indices are the (single) brand-model block, the inner one the value.
+    for i, gid in enumerate(generation_id or []):
+        wire[f"generation_id[0][{i}]"] = gid
+    for i, mid in enumerate(modification_id or []):
+        wire[f"modification_id[0][0][{i}]"] = mid
 
     resolved: dict[str, Any] = {"category_id": _CATEGORY_ID}
     if marka_id is not None:
@@ -142,9 +206,15 @@ async def search_used_cars_impl(
     body: str | None = None,
     mileage_from: int | None = None,
     mileage_to: int | None = None,
+    engine_volume_from: float | None = None,
+    engine_volume_to: float | None = None,
+    power_hp_from: int | None = None,
+    power_hp_to: int | None = None,
+    generation_id: list[int] | None = None,
+    modification_id: list[int] | None = None,
     page: int = 0,
     page_size: int = 10,
-    order_by: int = 0,
+    order_by: int | str = 0,
 ) -> SearchResult:
     """Run one search and return the shaped, OfferOfTheDay-filtered result."""
     wire, resolved = await build_search_query(
@@ -163,6 +233,12 @@ async def search_used_cars_impl(
         body=body,
         mileage_from=mileage_from,
         mileage_to=mileage_to,
+        engine_volume_from=engine_volume_from,
+        engine_volume_to=engine_volume_to,
+        power_hp_from=power_hp_from,
+        power_hp_to=power_hp_to,
+        generation_id=generation_id,
+        modification_id=modification_id,
         page=page,
         page_size=page_size,
         order_by=order_by,
@@ -182,7 +258,7 @@ async def search_used_cars_impl(
             "the result would be the entire catalogue. Aborting rather than return it."
         )
 
-    return shape_search(raw, page=page, page_size=page_size, search_url=web_search_url(resolved))
+    return shape_search(raw, page=page, page_size=page_size)
 
 
 def register_search_tools(mcp: FastMCP) -> None:
@@ -239,40 +315,73 @@ def register_search_tools(mcp: FastMCP) -> None:
         mileage_to: Annotated[
             int | None, Field(default=None, description="Maximum mileage in km, e.g. 150000.")
         ] = None,
+        engine_volume_from: Annotated[
+            float | None,
+            Field(default=None, description="Min engine volume in litres, e.g. 1.9."),
+        ] = None,
+        engine_volume_to: Annotated[
+            float | None,
+            Field(default=None, description="Max engine volume in litres, e.g. 2.1."),
+        ] = None,
+        power_hp_from: Annotated[
+            int | None, Field(default=None, description="Min engine power in hp (к.с.).")
+        ] = None,
+        power_hp_to: Annotated[
+            int | None, Field(default=None, description="Max engine power in hp (к.с.).")
+        ] = None,
+        generation_id: Annotated[
+            list[int] | None,
+            Field(
+                default=None,
+                description=(
+                    "Generation id(s) from `list_generations`. Pass several to span "
+                    "facelifts of one generation (e.g. C7, C7 FL)."
+                ),
+            ),
+        ] = None,
+        modification_id: Annotated[
+            list[int] | None,
+            Field(default=None, description="Modification id(s) from `list_modifications`."),
+        ] = None,
         page: Annotated[int, Field(default=0, ge=0, description="0-based page number.")] = 0,
         page_size: Annotated[
             int, Field(default=10, ge=1, le=100, description="Results per page (1-100).")
         ] = 10,
         order_by: Annotated[
-            int,
+            int | str,
             Field(
-                default=0,
+                default="relevance",
                 description=(
-                    "Sort: 0 relevance, 2 price asc, 3 price desc, 5 year newest, "
-                    "6 year oldest, 7 date newest, 8 date oldest, 12 mileage desc, "
-                    "13 mileage asc."
+                    "Sort order — pass a name (preferred) or the legacy int: "
+                    "relevance (0), price_asc (2), price_desc (3), year_desc (5, "
+                    "newest), year_asc (6), date_desc (7, newest listing), date_asc "
+                    "(8), mileage_desc (12), mileage_asc (13)."
                 ),
             ),
-        ] = 0,
+        ] = "relevance",
     ) -> SearchResult:
         """Search AUTO.RIA used-car listings (passenger cars) by friendly inputs.
 
         Resolves brand/model/region/city/fuel/gearbox/body **names** to AUTO.RIA
         ids for you, then makes a single search call. Returns the total match
-        `count`, the current `page`/`page_size`, the matching advert `ids` (used
-        cars only — the OfferOfTheDay promo is filtered out), and a `search_url`
-        that reproduces the query on auto.ria.com (the canonical attribution
-        link). To get a specific listing's details and its own URL, pass an id to
+        `count`, the current `page`/`page_size`, and the matching advert `ids`
+        (used cars only — the OfferOfTheDay promo is filtered out). To get a
+        specific listing's details and its own auto.ria.com URL, pass an id to
         `get_car_details`.
 
         Notes:
-          * Mileage is in **km** (e.g. `mileage_to=150000`).
-          * `model` requires `brand`; `city` requires `region`.
-          * v1 supports a single brand+model+year block. For multi-brand or
-            advanced raw queries use the `raw_search` tool.
+          * Mileage is in **km** (e.g. `mileage_to=150000`); engine volume is in
+            **litres** (`engine_volume_from=1.9`), power in **hp** (`power_hp_from`).
+          * Engine volume is stored imprecisely upstream (a 2.0 may appear as 1.97),
+            so use a band (e.g. 1.9–2.1) rather than an exact value.
+          * `model` requires `brand`; `city` requires `region`. Filter by
+            `generation_id`/`modification_id` (from `list_generations` /
+            `list_modifications`) to isolate a specific generation or engine/trim.
+          * v1 supports a single brand+model block. For multi-brand queries use
+            the `raw_search` tool.
 
-        Example: `search_used_cars(brand="BMW", model="3 Series", year_from=2018,
-        price_to=30000, currency="USD", gearbox="Автомат", order_by=2)`.
+        Example: `search_used_cars(brand="Audi", model="A6", body="Універсал",
+        engine_volume_from=1.9, engine_volume_to=2.1, fuel="Дизель", order_by="price_asc")`.
         """
         async with tool_errors():
             return await search_used_cars_impl(
@@ -291,6 +400,12 @@ def register_search_tools(mcp: FastMCP) -> None:
                 body=body,
                 mileage_from=mileage_from,
                 mileage_to=mileage_to,
+                engine_volume_from=engine_volume_from,
+                engine_volume_to=engine_volume_to,
+                power_hp_from=power_hp_from,
+                power_hp_to=power_hp_to,
+                generation_id=generation_id,
+                modification_id=modification_id,
                 page=page,
                 page_size=page_size,
                 order_by=order_by,

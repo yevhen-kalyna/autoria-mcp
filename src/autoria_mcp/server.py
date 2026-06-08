@@ -56,8 +56,16 @@ def build_server(settings: Settings) -> FastMCP:
         "autoria",
         instructions=(
             "Agent-friendly access to the AUTO.RIA used-car market (auto.ria.com). "
-            "Resolve brand/model/region names to IDs via the lookup tools, then "
-            "search. API quota is scarce - prefer cached lookups and narrow filters."
+            "Workflow: resolve brand/model/region names to IDs with the lookup "
+            "tools, then `search_used_cars`, then `get_car_details` (or "
+            "`get_car_details_batch` for a whole result page), and "
+            "`get_average_price` for fair-value. "
+            "All listing data is SELLER-DECLARED and UNVERIFIED: for any purchase "
+            "decision check `risk` (damaged/for-parts/under-credit/imported), "
+            "`condition`, and `verification` on the details, and treat `mileage_km` "
+            "and prices as claims, not facts. Dictionary lookups are cached, so "
+            "resolve names freely; the paid VIN/price endpoints cost quota — the "
+            "`quota` field in their responses reports what remains."
         ),
         host=settings.host,
         port=settings.port,

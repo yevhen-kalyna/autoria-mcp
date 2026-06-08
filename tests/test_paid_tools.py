@@ -105,6 +105,24 @@ async def test_build_avg_price_params_wire_vocabulary(
 
 
 @respx.mock
+async def test_build_avg_price_params_includes_engine_volume(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """ISSUE-1: engine volume constrains the priced cohort (no raw_search needed)."""
+    _mock_renault_megane()
+    rt = make_runtime(settings)
+    async with rt.client:
+        params = await build_avg_price_params(
+            rt,
+            brand="Renault",
+            model="Megane",
+            engine_volume_from=1.9,
+            engine_volume_to=2.1,
+        )
+    assert params["engineVolume"] == {"gte": "1.9", "lte": "2.1"}
+
+
+@respx.mock
 async def test_get_average_price_by_params(settings: Settings, make_runtime: MakeRuntime) -> None:
     _mock_renault_megane()
     route = respx.post(AVG).mock(
@@ -117,10 +135,36 @@ async def test_get_average_price_by_params(settings: Settings, make_runtime: Mak
         )
     assert result.statistic_data[0].price_usd == 7415
     assert result.similar_cars[0].city == "Рівне"
+    # G/ISSUE-9/K: reliability + provenance metadata is attached to the result.
+    assert result.avg_price_usd == 7415
+    assert result.sample_count == 1
+    assert result.price_consistency == "avg_below_sample"
+    assert result.status == "ok"
+    assert result.cohort is not None and result.cohort["brandId"] == "62"
+    assert result.quota is not None and "month_limit" in result.quota
     # The request body carries the JSON shape, not query params.
     body = json.loads(route.calls.last.request.content)
     assert body["period"] == 365
     assert body["params"]["brandId"] == "62"
+
+
+@respx.mock
+async def test_get_average_price_stats_only_omits_samples(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """ISSUE-8: include_samples=False drops the listings but keeps the stats."""
+    _mock_renault_megane()
+    respx.post(AVG).mock(
+        return_value=httpx.Response(200, json=load_fixture("ai_average_price_params"))
+    )
+    rt = make_runtime(settings)
+    async with rt.client:
+        result = await get_average_price_impl(
+            rt, brand="Renault", model="Megane", year_from=2009, include_samples=False
+        )
+    assert result.similar_cars == []  # verbose listings dropped
+    assert result.sample_count == 1  # but the sample size/spread survive
+    assert result.sample_max_usd == 7650
 
 
 @respx.mock

@@ -47,6 +47,7 @@ async def test_in_process_roundtrip(settings: Settings) -> None:
             "ping",
             "search_used_cars",
             "get_car_details",
+            "get_car_details_batch",
             "get_average_price",
             "get_average_price_over_periods",
             "get_params_by_vin",
