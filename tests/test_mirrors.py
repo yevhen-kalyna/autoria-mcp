@@ -19,9 +19,7 @@ MakeRuntime = Callable[[Settings], RuntimeContext]
 
 
 @respx.mock
-async def test_raw_search_compact_by_default(
-    settings: Settings, make_runtime: MakeRuntime
-) -> None:
+async def test_raw_search_compact_by_default(settings: Settings, make_runtime: MakeRuntime) -> None:
     """ISSUE-7/13: default returns the compact SearchResult, OfferOfTheDay filtered."""
     respx.get(f"{BASE}/auto/search").mock(
         return_value=httpx.Response(200, json=load_fixture("search"))
