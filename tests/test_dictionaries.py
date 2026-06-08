@@ -98,6 +98,31 @@ async def test_english_fuel_alias_resolves(settings: Settings) -> None:
 
 
 @respx.mock
+async def test_fuel_ids_expands_hybrid_group(settings: Settings) -> None:
+    """'Гібрид'/'hybrid' (no subtype) expands to every hybrid subtype id, so one
+    search call can cover HEV/PHEV/MHEV/REEV instead of fanning out 4 queries."""
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        assert sorted(await resolver.fuel_ids("Гібрид")) == [5, 10, 11, 12]
+        assert sorted(await resolver.fuel_ids("hybrid")) == [5, 10, 11, 12]
+
+
+@respx.mock
+async def test_fuel_ids_single_for_specific_type(settings: Settings) -> None:
+    """A specific fuel (including a specific hybrid subtype) resolves to one id."""
+    respx.get(f"{BASE}/auto/type").mock(
+        return_value=httpx.Response(200, json=load_fixture("fuel_types"))
+    )
+    client, resolver = _resolver(settings)
+    async with client:
+        assert await resolver.fuel_ids("Дизель") == [2]
+        assert await resolver.fuel_ids("Гібрид (PHEV)") == [10]
+
+
+@respx.mock
 async def test_english_gearbox_alias_resolves(settings: Settings) -> None:
     respx.get(f"{BASE}/auto/categories/1/gearboxes").mock(
         return_value=httpx.Response(200, json=load_fixture("gearboxes"))

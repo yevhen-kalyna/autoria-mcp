@@ -371,17 +371,34 @@ def _avg_price_block(statistic_data: list[StatisticDatum]) -> StatisticDatum | N
     return None
 
 
+# Below this many comparable listings the sample is too thin to trust as a fair
+# value, regardless of how the headline lines up.
+_MIN_RELIABLE_SAMPLE = 5
+
+# Cohort keys that narrow to a specific engine/trim. AUTO.RIA's AI headline is
+# model-level and does not reliably honour these, so when one is requested and the
+# headline falls outside its own comps we demote the result.
+_NARROWING_COHORT_KEYS = ("engineVolume", "modificationId", "generationId")
+
+
+def _has_narrowing_filter(cohort: dict[str, Any] | None) -> bool:
+    return cohort is not None and any(k in cohort for k in _NARROWING_COHORT_KEYS)
+
+
 def shape_average_price(
     raw: Any, *, cohort: dict[str, Any] | None = None, period: int | None = None
 ) -> AveragePriceResult:
     """Flatten a ``/auto/ai-avarage-price/`` response and annotate its reliability.
 
-    The headline ``avg_price_*`` is RIA's AI estimate, surfaced verbatim. The API
-    exposes no population distribution, only a small ``similar_cars`` sample, so
+    The headline ``avg_price_*`` is RIA's model-level AI estimate, surfaced verbatim;
+    it is only weakly sensitive to tight cohort filters, so we also expose
+    ``cohort_estimate_usd`` (the comps' median) as the cohort-appropriate figure. The
+    API exposes no population distribution, only a small ``similar_cars`` sample, so
     we add the sample size + the sample's own USD spread and a ``price_consistency``
-    flag that trips when the headline sits outside that spread — the exact
-    contradiction agents otherwise surface as authoritative. ``cohort``/``period``
-    echo what was actually queried.
+    flag that trips when the headline sits outside that spread. ``status`` is demoted
+    to ``insufficient_sample`` when the sample is thin (< ``_MIN_RELIABLE_SAMPLE``) or
+    when a narrowing cohort was queried yet the headline ignored it.
+    ``cohort``/``period`` echo what was actually queried.
     """
     similar = raw.get("similarCars") if isinstance(raw, dict) else None
     stats = raw.get("statisticData") if isinstance(raw, dict) else None
@@ -417,17 +434,28 @@ def shape_average_price(
         else:
             price_consistency = "ok"
 
+    sample_count = len(similar_cars)
     if not statistic_data and not similar_cars:
         status = "no_data"
     elif avg_price_usd is None and avg_price_uah is None:
         status = "insufficient_sample"  # comparable listings but no average estimate
+    elif sample_count < _MIN_RELIABLE_SAMPLE:
+        status = "insufficient_sample"  # too few comps to trust as a fair value
+    elif _has_narrowing_filter(cohort) and price_consistency in {
+        "avg_above_sample",
+        "avg_below_sample",
+    }:
+        # A tight engine/trim cohort was asked for, but the model-level headline
+        # sits outside its own comps — it did not honour the cohort.
+        status = "insufficient_sample"
     else:
         status = "ok"
 
     return AveragePriceResult(
         avg_price_usd=avg_price_usd,
         avg_price_uah=avg_price_uah,
-        sample_count=len(similar_cars),
+        cohort_estimate_usd=sample_median,
+        sample_count=sample_count,
         sample_min_usd=sample_min,
         sample_median_usd=sample_median,
         sample_max_usd=sample_max,

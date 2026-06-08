@@ -175,6 +175,30 @@ def test_shape_average_price() -> None:
     assert result.statistic_data[0].price_usd == 7415
 
 
+def _raw_avg(prices_usd: list[int], avg_usd: int | None) -> dict:
+    """Build a realistic ``/auto/ai-avarage-price/`` payload (no mocks)."""
+    cars = [
+        {
+            "id": 1000 + i,
+            "title": "Test Car",
+            "year": 2015,
+            "price": {"all": {"USD": {"value": f"{p:,}".replace(",", " ")}}},
+        }
+        for i, p in enumerate(prices_usd)
+    ]
+    stats: list[dict] = []
+    if avg_usd is not None:
+        stats.append(
+            {
+                "id": "avgPriceBlock",
+                "name": "Середня ціна",
+                "type": "avgPrice",
+                "price": {"USD": avg_usd, "UAH": avg_usd * 43},
+            }
+        )
+    return {"similarCars": cars, "statisticData": stats}
+
+
 def test_shape_average_price_reliability_metadata() -> None:
     """G + ISSUE-9: surface sample size/spread and flag avg-vs-comps inconsistency."""
     result = shape_average_price(
@@ -186,9 +210,11 @@ def test_shape_average_price_reliability_metadata() -> None:
     # Headline ($7,415) sits below the only comp it cites ($7,650) — the exact
     # contradiction agents otherwise present as authoritative.
     assert result.price_consistency == "avg_below_sample"
+    assert result.cohort_estimate_usd == 7650  # sample-derived, cohort-appropriate
     assert result.cohort == {"brandId": "62"}
     assert result.period == 365
-    assert result.status == "ok"
+    # A single comp is too thin to trust as a fair value.
+    assert result.status == "insufficient_sample"
 
 
 def test_shape_average_price_empty_is_no_data() -> None:
@@ -198,6 +224,41 @@ def test_shape_average_price_empty_is_no_data() -> None:
     assert result.sample_count == 0
     assert result.avg_price_usd is None
     assert result.price_consistency is None
+    assert result.cohort_estimate_usd is None
+
+
+def test_small_sample_is_insufficient_even_when_consistent() -> None:
+    """A 3-comp sample is too thin to call a fair value, even if the headline
+    sits inside the comp spread (price_consistency == 'ok')."""
+    raw = _raw_avg([9000, 10000, 11000], avg_usd=10000)
+    result = shape_average_price(raw, cohort={"brandId": "58"}, period=365)
+    assert result.sample_count == 3
+    assert result.price_consistency == "ok"
+    assert result.status == "insufficient_sample"
+    assert result.cohort_estimate_usd == 10000  # median of the comps
+
+
+def test_narrowing_filter_with_headline_outside_sample_is_demoted() -> None:
+    """Even with a size-adequate sample, an engineVolume-cohorted headline that
+    sits outside its own comps is demoted — the model-level headline ignored the
+    volume bound (the reproduced get_average_price bug)."""
+    raw = _raw_avg([6000, 6500, 7000, 7200, 7500], avg_usd=9282)
+    cohort = {"brandId": "58", "engineVolume": {"gte": "1.9", "lte": "2.1"}}
+    result = shape_average_price(raw, cohort=cohort, period=365)
+    assert result.sample_count == 5
+    assert result.price_consistency == "avg_above_sample"
+    assert result.status == "insufficient_sample"
+    assert result.cohort_estimate_usd == 7000
+
+
+def test_healthy_sample_is_ok() -> None:
+    """Size-adequate sample with the headline inside its comp spread → ok."""
+    raw = _raw_avg([9000, 9500, 10000, 10500, 11000], avg_usd=10000)
+    result = shape_average_price(raw, cohort={"brandId": "58"}, period=365)
+    assert result.sample_count == 5
+    assert result.price_consistency == "ok"
+    assert result.status == "ok"
+    assert result.cohort_estimate_usd == 10000
 
 
 def test_shape_statistic() -> None:

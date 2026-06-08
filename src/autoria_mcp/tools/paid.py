@@ -343,10 +343,24 @@ def register_paid_tools(mcp: FastMCP) -> None:
         body: Annotated[str | None, Field(default=None, description="Body style name.")] = None,
         color: Annotated[str | None, Field(default=None, description="Colour name.")] = None,
         engine_volume_from: Annotated[
-            float | None, Field(default=None, description="Min engine volume in litres, e.g. 1.9.")
+            float | None,
+            Field(
+                default=None,
+                description=(
+                    "Min engine volume in litres, e.g. 1.9. Narrows the comparable "
+                    "sample, NOT the model-level headline estimate."
+                ),
+            ),
         ] = None,
         engine_volume_to: Annotated[
-            float | None, Field(default=None, description="Max engine volume in litres, e.g. 2.1.")
+            float | None,
+            Field(
+                default=None,
+                description=(
+                    "Max engine volume in litres, e.g. 2.1. Narrows the comparable "
+                    "sample, NOT the model-level headline estimate."
+                ),
+            ),
         ] = None,
         generation_id: Annotated[
             int | None,
@@ -377,18 +391,21 @@ def register_paid_tools(mcp: FastMCP) -> None:
         Two modes: pass `omni_id` (VIN/plate/advert id), OR car parameters by
         name (`brand`+`model` required, plus at least one more filter such as
         `year_from`/`mileage_to`/`fuel`/`engine_volume_from`). Names are resolved
-        to ids for you; `generation_id`/`modification_id` are optional raw ids
-        that sharpen the estimate. Constrain `engine_volume_from`/`_to` (litres)
-        to avoid mixing, e.g., 1.6 and 2.0 cohorts. Requires `AUTORIA_USER_ID`.
-        `period` ∈ {30, 90, 180, 365}.
+        to ids for you; `generation_id`/`modification_id` are optional raw ids.
+        Requires `AUTORIA_USER_ID`. `period` ∈ {30, 90, 180, 365}.
 
-        The headline `avg_price_usd`/`avg_price_uah` is AUTO.RIA's own AI estimate.
-        To judge its reliability, the response also returns `sample_count` and the
-        sample's own `sample_min_usd`/`sample_median_usd`/`sample_max_usd`, plus a
-        `price_consistency` flag that is `avg_below_sample`/`avg_above_sample` when
-        the headline falls outside its own comparables. `status` is `no_data` /
-        `insufficient_sample` / `ok`, `cohort` echoes the resolved filters, and
-        `quota` reports remaining API budget.
+        The headline `avg_price_usd`/`avg_price_uah` is AUTO.RIA's own **model-level**
+        AI estimate — it is only weakly sensitive to `engine_volume`/`modification`,
+        so do NOT read it as an engine-precise fair value. For that, prefer
+        `cohort_estimate_usd` (the median of the comparable listings), keeping in mind
+        the sample is small. To judge reliability, the response also returns
+        `sample_count` and the sample's own `sample_min_usd`/`sample_median_usd`/
+        `sample_max_usd`, plus a `price_consistency` flag that is `avg_below_sample`/
+        `avg_above_sample` when the headline falls outside its own comparables.
+        `status` is `no_data` / `insufficient_sample` / `ok` — it is
+        `insufficient_sample` when the sample is thin (< 5 comps) or when a tight
+        cohort was requested yet the headline ignored it. `cohort` echoes the resolved
+        filters and `quota` reports remaining API budget.
 
         Note: facelifts are distinct `generation_id`s and this endpoint takes a
         single one — call once per generation to price a whole family.
@@ -441,10 +458,24 @@ def register_paid_tools(mcp: FastMCP) -> None:
         body: Annotated[str | None, Field(default=None, description="Body style name.")] = None,
         color: Annotated[str | None, Field(default=None, description="Colour name.")] = None,
         engine_volume_from: Annotated[
-            float | None, Field(default=None, description="Min engine volume in litres, e.g. 1.9.")
+            float | None,
+            Field(
+                default=None,
+                description=(
+                    "Min engine volume in litres, e.g. 1.9. Narrows the comparable "
+                    "sample, NOT the model-level headline estimate."
+                ),
+            ),
         ] = None,
         engine_volume_to: Annotated[
-            float | None, Field(default=None, description="Max engine volume in litres, e.g. 2.1.")
+            float | None,
+            Field(
+                default=None,
+                description=(
+                    "Max engine volume in litres, e.g. 2.1. Narrows the comparable "
+                    "sample, NOT the model-level headline estimate."
+                ),
+            ),
         ] = None,
         generation_id: Annotated[
             int | None,

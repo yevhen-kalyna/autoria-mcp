@@ -114,7 +114,11 @@ def register_lookup_tools(mcp: FastMCP) -> None:
             Field(default=None, description="Optional region/oblast name to resolve."),
         ] = None,
     ) -> list[dict[str, Any]]:
-        """List regions (oblasts), or resolve one region name to its id."""
+        """List regions (oblasts), or resolve one region name to its id.
+
+        Note: Kyiv city and Kyiv oblast are distinct, region-scoped entities — a
+        "Kyiv city + surrounding oblast" search may need two passes.
+        """
         async with tool_errors():
             return await lookup_regions_impl(get_runtime(), name=name)
 

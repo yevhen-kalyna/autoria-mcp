@@ -118,7 +118,7 @@ async def build_search_query(
     model_id = await rt.resolver.model_id(brand, model) if (brand and model) else None
     state_id = await rt.resolver.region_id(region) if region else None
     city_id = await rt.resolver.city_id(region, city) if (region and city) else None
-    fuel_id = await rt.resolver.fuel_id(fuel) if fuel else None
+    fuel_ids = await rt.resolver.fuel_ids(fuel) if fuel else None
     gearbox_id = await rt.resolver.gearbox_id(gearbox) if gearbox else None
     body_id = await rt.resolver.body_id(body) if body else None
 
@@ -145,8 +145,8 @@ async def build_search_query(
         wire["s_yers[0]"] = year_from
     if year_to is not None:
         wire["po_yers[0]"] = year_to
-    if fuel_id is not None:
-        wire["type[0]"] = fuel_id
+    for i, fid in enumerate(fuel_ids or []):
+        wire[f"type[{i}]"] = fid
     if gearbox_id is not None:
         wire["gearbox[0]"] = gearbox_id
     if body_id is not None:
@@ -299,7 +299,14 @@ def register_search_tools(mcp: FastMCP) -> None:
         ] = "USD",
         fuel: Annotated[
             str | None,
-            Field(default=None, description="Fuel type name, e.g. 'Дизель', 'Електро'."),
+            Field(
+                default=None,
+                description=(
+                    "Fuel type name, e.g. 'Дизель', 'Електро'. 'Гібрид' (or 'hybrid') "
+                    "covers all subtypes (HEV/PHEV/MHEV/REEV) in one call; pass an exact "
+                    "subtype like 'Гібрид (PHEV)' to narrow."
+                ),
+            ),
         ] = None,
         gearbox: Annotated[
             str | None,
@@ -355,7 +362,10 @@ def register_search_tools(mcp: FastMCP) -> None:
                     "Sort order — pass a name (preferred) or the legacy int: "
                     "relevance (0), price_asc (2), price_desc (3), year_desc (5, "
                     "newest), year_asc (6), date_desc (7, newest listing), date_asc "
-                    "(8), mileage_desc (12), mileage_asc (13)."
+                    "(8), mileage_desc (12), mileage_asc (13). The default 'relevance' "
+                    "may surface promoted/closest matches first and bury the cheapest or "
+                    "newest; for an exhaustive or price-ranked sweep pass an explicit sort "
+                    "(e.g. 'price_asc') and page through `count`."
                 ),
             ),
         ] = "relevance",
