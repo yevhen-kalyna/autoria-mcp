@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-09
+
+Correctness + ergonomics from another real agent session (Peugeot 508, Kyiv). The
+0.2.1 `cohort_estimate_usd` was found to be computed from comps that **leak the
+cohort** (1.5 L / 2021 comps for a 1.9–2.1 / 2018–2020 query); this round makes it
+cohort-true and removes the mandatory second round-trip after a search. Additive
+fields + one opt-in flag; no breaking changes.
+
+### Added
+
+- **Cohort-true `cohort_estimate_usd`** — each `similar_cars` comp now carries
+  `engine_volume_l` (parsed from its fuel string) and an `in_cohort` flag; the
+  estimate is the median of the in-cohort comps only, with a new `in_cohort_count`.
+  A comp is dropped only on a *confirmed* bound violation (known year/volume outside
+  the requested range); unknown attributes are kept.
+- **`include_details` on `search_used_cars`** — opt-in flag that fetches the page's
+  listings inline (compact details aligned to `ids`), removing the usual follow-up
+  `get_car_details_batch`. Capped at `page_size <= 50`; costs ~`page_size` extra
+  upstream calls. `SearchResult` gains an optional `details` field (default `None`).
+
+### Changed
+
+- **`get_average_price` `status`** now demotes to `insufficient_sample` when fewer
+  than 5 comps are *in-cohort* (previously: total sample < 5).
+
+### Fixed
+
+- **Kyiv region note** (corrects 0.2.1): there is no separate "Київ" region — only
+  `Київська` (id 10). Kyiv city is reached via `region="Київська", city="Київ"`.
+
+### Docs
+
+- `list_generations`: documented `yearTo: 0` as a "current / still produced" sentinel.
+- `get_average_price`/`AveragePriceResult.quota`: clarified `quota` is a local,
+  advisory, warn-only counter (can exceed its limit, never blocks) — not AUTO.RIA's
+  enforced budget; don't hard-gate on it.
+- `fuel="Гібрид"`: noted the umbrella includes MHEV (mild hybrids ≈ ICE); pass an
+  explicit subtype (`Гібрид (HEV)`/`Гібрид (PHEV)`) for full/plug-in hybrids.
+
+### Backlog
+
+- Mirror-tool naming/envelope unification (snake_case + consistent wrapper for
+  `list_generations` etc.) is deferred — a breaking output change for a later release.
+
 ## [0.2.1] - 2026-06-08
 
 Follow-up correctness fixes from a real agent session (Peugeot 508). The
@@ -169,7 +213,8 @@ backed by a typed async client, tiered caching, and an OIDC release pipeline.
   audit trail, README (config + tool catalog + quota guidance + known
   limitations), runnable `examples/`, `CONTRIBUTING.md`, and `SECURITY.md`.
 
-[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/yevhen-kalyna/autoria-mcp/compare/v0.1.0...v0.1.1

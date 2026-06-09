@@ -116,8 +116,9 @@ def register_lookup_tools(mcp: FastMCP) -> None:
     ) -> list[dict[str, Any]]:
         """List regions (oblasts), or resolve one region name to its id.
 
-        Note: Kyiv city and Kyiv oblast are distinct, region-scoped entities — a
-        "Kyiv city + surrounding oblast" search may need two passes.
+        Note: there is no separate "Київ" (Kyiv city) region — only `Київська`
+        (oblast, id 10). Kyiv city is a *city* within it: target it with
+        `region="Київська"`, `city="Київ"` (via `lookup_cities` / `search_used_cars`).
         """
         async with tool_errors():
             return await lookup_regions_impl(get_runtime(), name=name)

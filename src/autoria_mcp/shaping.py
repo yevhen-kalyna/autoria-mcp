@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from collections.abc import Callable
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -349,6 +350,7 @@ def shape_car_details(raw: Any) -> CarDetails:
 
 def _shape_similar_car(entry: Any) -> SimilarCar:
     entry = entry if isinstance(entry, dict) else {}
+    fuel_label = _dig(entry, "fuel", "name")
     return SimilarCar(
         id=entry.get("id"),
         title=entry.get("title"),
@@ -356,11 +358,38 @@ def _shape_similar_car(entry: Any) -> SimilarCar:
         price_usd=_dig(entry, "price", "all", "USD", "value"),
         price_uah=_dig(entry, "price", "all", "UAH", "value"),
         mileage_km=_thousands_km(entry.get("raceInt")),
-        fuel=_dig(entry, "fuel", "name"),
+        fuel=fuel_label,
+        engine_volume_l=parse_engine_volume(fuel_label),
         gearbox=_dig(entry, "gearbox", "name"),
         city=_dig(entry, "location", "city", "name"),
         url=listing_url(entry.get("uri")),
     )
+
+
+def _cohort_range(
+    cohort: dict[str, Any] | None, key: str, cast: Callable[[Any], float]
+) -> tuple[float | None, float | None]:
+    """Extract a numeric ``{gte, lte}`` bound from the resolved cohort, if present."""
+    block = cohort.get(key) if isinstance(cohort, dict) else None
+    if not isinstance(block, dict):
+        return None, None
+
+    def _num(value: Any) -> float | None:
+        try:
+            return cast(value)
+        except (TypeError, ValueError):
+            return None
+
+    return _num(block.get("gte")), _num(block.get("lte"))
+
+
+def _within(value: float | None, lo: float | None, hi: float | None) -> bool:
+    """True unless ``value`` is known and falls outside a present bound (unknown = ok)."""
+    if value is None:
+        return True
+    if lo is not None and value < lo:
+        return False
+    return not (hi is not None and value > hi)
 
 
 def _avg_price_block(statistic_data: list[StatisticDatum]) -> StatisticDatum | None:
@@ -391,14 +420,15 @@ def shape_average_price(
     """Flatten a ``/auto/ai-avarage-price/`` response and annotate its reliability.
 
     The headline ``avg_price_*`` is RIA's model-level AI estimate, surfaced verbatim;
-    it is only weakly sensitive to tight cohort filters, so we also expose
-    ``cohort_estimate_usd`` (the comps' median) as the cohort-appropriate figure. The
-    API exposes no population distribution, only a small ``similar_cars`` sample, so
-    we add the sample size + the sample's own USD spread and a ``price_consistency``
-    flag that trips when the headline sits outside that spread. ``status`` is demoted
-    to ``insufficient_sample`` when the sample is thin (< ``_MIN_RELIABLE_SAMPLE``) or
-    when a narrowing cohort was queried yet the headline ignored it.
-    ``cohort``/``period`` echo what was actually queried.
+    it is only weakly sensitive to tight cohort filters. The upstream ``similar_cars``
+    can themselves leak the cohort, so each comp is flagged ``in_cohort`` against the
+    requested year/volume bounds and ``cohort_estimate_usd`` is the median of the
+    in-cohort comps only (``in_cohort_count`` reports how many qualified). The API
+    exposes no population distribution, so we also add the full sample's USD spread and
+    a ``price_consistency`` flag that trips when the headline sits outside that spread.
+    ``status`` is demoted to ``insufficient_sample`` when fewer than
+    ``_MIN_RELIABLE_SAMPLE`` comps are in-cohort or when a narrowing cohort was queried
+    yet the headline ignored it. ``cohort``/``period`` echo what was actually queried.
     """
     similar = raw.get("similarCars") if isinstance(raw, dict) else None
     stats = raw.get("statisticData") if isinstance(raw, dict) else None
@@ -425,6 +455,20 @@ def shape_average_price(
     sample_max = max(sample_usd) if sample_usd else None
     sample_median = round(statistics.median(sample_usd)) if sample_usd else None
 
+    # Cohort fidelity: upstream comps can leak the requested cohort, so flag each comp
+    # against the year/volume bounds and base the cohort estimate only on the matches.
+    year_lo, year_hi = _cohort_range(cohort, "year", int)
+    vol_lo, vol_hi = _cohort_range(cohort, "engineVolume", float)
+    for car in similar_cars:
+        car.in_cohort = _within(car.year, year_lo, year_hi) and _within(
+            car.engine_volume_l, vol_lo, vol_hi
+        )
+    cohort_usd = [
+        p for c in similar_cars if c.in_cohort and (p := price_to_int(c.price_usd)) is not None
+    ]
+    in_cohort_count = sum(1 for c in similar_cars if c.in_cohort)
+    cohort_estimate = round(statistics.median(cohort_usd)) if cohort_usd else None
+
     price_consistency: str | None = None
     if avg_price_usd is not None and sample_min is not None and sample_max is not None:
         if avg_price_usd < sample_min:
@@ -439,8 +483,8 @@ def shape_average_price(
         status = "no_data"
     elif avg_price_usd is None and avg_price_uah is None:
         status = "insufficient_sample"  # comparable listings but no average estimate
-    elif sample_count < _MIN_RELIABLE_SAMPLE:
-        status = "insufficient_sample"  # too few comps to trust as a fair value
+    elif in_cohort_count < _MIN_RELIABLE_SAMPLE:
+        status = "insufficient_sample"  # too few in-cohort comps to trust as a fair value
     elif _has_narrowing_filter(cohort) and price_consistency in {
         "avg_above_sample",
         "avg_below_sample",
@@ -454,8 +498,9 @@ def shape_average_price(
     return AveragePriceResult(
         avg_price_usd=avg_price_usd,
         avg_price_uah=avg_price_uah,
-        cohort_estimate_usd=sample_median,
+        cohort_estimate_usd=cohort_estimate,
         sample_count=sample_count,
+        in_cohort_count=in_cohort_count,
         sample_min_usd=sample_min,
         sample_median_usd=sample_median,
         sample_max_usd=sample_max,

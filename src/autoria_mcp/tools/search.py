@@ -31,10 +31,13 @@ from autoria_mcp.models import SearchResult
 from autoria_mcp.runtime import RuntimeContext, get_runtime
 from autoria_mcp.shaping import cleaned_params, shape_search
 from autoria_mcp.tools._errors import tool_errors
+from autoria_mcp.tools.details import get_car_details_batch_impl
 
 # v1 search is passenger-cars only; category 1 scopes the category-specific
 # dictionaries (body styles, gearboxes) the resolver consults.
 _CATEGORY_ID = 1
+# `include_details` fetches one listing per id, so it is capped at the batch size.
+_DETAILS_PAGE_CAP = 50
 # Search currency codes are NOT the V3 codes: 1=USD, 2=EUR, 3=UAH.
 _CURRENCY: dict[str, int] = {"USD": 1, "EUR": 2, "UAH": 3}
 
@@ -215,8 +218,14 @@ async def search_used_cars_impl(
     page: int = 0,
     page_size: int = 10,
     order_by: int | str = 0,
+    include_details: bool = False,
 ) -> SearchResult:
     """Run one search and return the shaped, OfferOfTheDay-filtered result."""
+    if include_details and page_size > _DETAILS_PAGE_CAP:
+        raise AutoRiaError(
+            f"include_details fetches one listing per id; keep page_size <= "
+            f"{_DETAILS_PAGE_CAP} (got {page_size})."
+        )
     wire, resolved = await build_search_query(
         rt,
         brand=brand,
@@ -258,7 +267,10 @@ async def search_used_cars_impl(
             "the result would be the entire catalogue. Aborting rather than return it."
         )
 
-    return shape_search(raw, page=page, page_size=page_size)
+    result = shape_search(raw, page=page, page_size=page_size)
+    if include_details and result.ids:
+        result.details = await get_car_details_batch_impl(rt, auto_ids=[int(i) for i in result.ids])
+    return result
 
 
 def register_search_tools(mcp: FastMCP) -> None:
@@ -303,8 +315,9 @@ def register_search_tools(mcp: FastMCP) -> None:
                 default=None,
                 description=(
                     "Fuel type name, e.g. 'Дизель', 'Електро'. 'Гібрид' (or 'hybrid') "
-                    "covers all subtypes (HEV/PHEV/MHEV/REEV) in one call; pass an exact "
-                    "subtype like 'Гібрид (PHEV)' to narrow."
+                    "covers all subtypes (HEV/PHEV/MHEV/REEV) in one call — note this "
+                    "includes MHEV (mild hybrids, essentially ICE); for full/plug-in "
+                    "hybrids pass an exact subtype like 'Гібрид (HEV)' / 'Гібрид (PHEV)'."
                 ),
             ),
         ] = None,
@@ -369,6 +382,18 @@ def register_search_tools(mcp: FastMCP) -> None:
                 ),
             ),
         ] = "relevance",
+        include_details: Annotated[
+            bool,
+            Field(
+                default=False,
+                description=(
+                    "If true, also fetch each listing on this page (compact details, "
+                    "aligned to `ids`) in one call — removes the usual follow-up "
+                    "`get_car_details_batch`. Costs ~`page_size` extra upstream calls, "
+                    "so keep `page_size` small; capped at page_size<=50."
+                ),
+            ),
+        ] = False,
     ) -> SearchResult:
         """Search AUTO.RIA used-car listings (passenger cars) by friendly inputs.
 
@@ -377,15 +402,16 @@ def register_search_tools(mcp: FastMCP) -> None:
         `count`, the current `page`/`page_size`, and the matching advert `ids`
         (used cars only — the OfferOfTheDay promo is filtered out). To get a
         specific listing's details and its own auto.ria.com URL, pass an id to
-        `get_car_details`.
+        `get_car_details`, or set `include_details=true` to get them inline.
 
         Notes:
           * Mileage is in **km** (e.g. `mileage_to=150000`); engine volume is in
             **litres** (`engine_volume_from=1.9`), power in **hp** (`power_hp_from`).
           * Engine volume is stored imprecisely upstream (a 2.0 may appear as 1.97),
             so use a band (e.g. 1.9–2.1) rather than an exact value.
-          * `model` requires `brand`; `city` requires `region`. Filter by
-            `generation_id`/`modification_id` (from `list_generations` /
+          * `model` requires `brand`; `city` requires `region`. To target Kyiv city,
+            use `region="Київська", city="Київ"` (there is no separate Kyiv region).
+            Filter by `generation_id`/`modification_id` (from `list_generations` /
             `list_modifications`) to isolate a specific generation or engine/trim.
           * v1 supports a single brand+model block. For multi-brand queries use
             the `raw_search` tool.
@@ -419,4 +445,5 @@ def register_search_tools(mcp: FastMCP) -> None:
                 page=page,
                 page_size=page_size,
                 order_by=order_by,
+                include_details=include_details,
             )

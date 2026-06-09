@@ -261,6 +261,77 @@ def test_healthy_sample_is_ok() -> None:
     assert result.cohort_estimate_usd == 10000
 
 
+def _raw_avg_comps(comps: list[dict], avg_usd: int | None) -> dict:
+    """Realistic payload where each comp carries year + a volume-bearing fuel string."""
+    cars = []
+    for i, c in enumerate(comps):
+        vol = c.get("volume")
+        fuel = f"Дизель, {vol} л." if vol is not None else "Дизель"
+        cars.append(
+            {
+                "id": 2000 + i,
+                "title": "Test Car",
+                "year": c.get("year"),
+                "fuel": {"name": fuel},
+                "price": {"all": {"USD": {"value": f"{c['price']:,}".replace(",", " ")}}},
+            }
+        )
+    stats: list[dict] = []
+    if avg_usd is not None:
+        stats.append({"id": "avgPriceBlock", "type": "avgPrice", "price": {"USD": avg_usd}})
+    return {"similarCars": cars, "statisticData": stats}
+
+
+def test_cohort_estimate_uses_only_in_cohort_comps() -> None:
+    """Comps that violate a known cohort bound (year or parsed volume) are excluded
+    from cohort_estimate_usd; unknowns and matches are kept."""
+    comps = [
+        {"price": 9000, "year": 2019, "volume": 2.0},  # in
+        {"price": 11000, "year": 2018, "volume": 1.97},  # in (2.0 stored imprecisely)
+        {"price": 10000, "year": 2020, "volume": 2.0},  # in
+        {"price": 5000, "year": 2021, "volume": 1.5},  # out: year + volume
+        {"price": 18000, "year": 2019, "volume": 1.5},  # out: volume
+    ]
+    raw = _raw_avg_comps(comps, avg_usd=12000)
+    cohort = {
+        "brandId": "58",
+        "engineVolume": {"gte": "1.9", "lte": "2.1"},
+        "year": {"gte": "2018", "lte": "2020"},
+    }
+    result = shape_average_price(raw, cohort=cohort, period=365)
+    assert result.sample_count == 5
+    assert result.in_cohort_count == 3
+    assert result.cohort_estimate_usd == 10000  # median of 9000/10000/11000
+    assert [c.in_cohort for c in result.similar_cars] == [True, True, True, False, False]
+    assert result.similar_cars[0].engine_volume_l == 2.0  # parsed from fuel string
+    assert result.similar_cars[3].engine_volume_l == 1.5
+
+
+def test_cohort_estimate_null_when_no_comps_in_cohort() -> None:
+    """If every comp violates the cohort, cohort_estimate is null and status demoted."""
+    comps = [
+        {"price": 5000, "year": 2021, "volume": 1.5},
+        {"price": 6000, "year": 2022, "volume": 1.5},
+        {"price": 7000, "year": 2021, "volume": 1.6},
+    ]
+    raw = _raw_avg_comps(comps, avg_usd=12000)
+    cohort = {"engineVolume": {"gte": "1.9", "lte": "2.1"}, "year": {"gte": "2018", "lte": "2020"}}
+    result = shape_average_price(raw, cohort=cohort, period=365)
+    assert result.in_cohort_count == 0
+    assert result.cohort_estimate_usd is None
+    assert result.status == "insufficient_sample"
+
+
+def test_unknown_volume_comp_not_excluded_by_volume_bound() -> None:
+    """A comp with no parseable volume is not a confirmed violation → stays in cohort."""
+    comps = [{"price": 8000, "year": 2019, "volume": None} for _ in range(5)]
+    raw = _raw_avg_comps(comps, avg_usd=8000)
+    cohort = {"engineVolume": {"gte": "1.9", "lte": "2.1"}, "year": {"gte": "2018", "lte": "2020"}}
+    result = shape_average_price(raw, cohort=cohort, period=365)
+    assert result.in_cohort_count == 5
+    assert result.cohort_estimate_usd == 8000
+
+
 def test_shape_statistic() -> None:
     series = shape_statistic(load_fixture("statistic"))
     assert len(series.graph_data) == 3

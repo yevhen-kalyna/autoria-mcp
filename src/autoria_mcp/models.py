@@ -89,6 +89,9 @@ class SearchResult(AutoRiaModel):
     page: int = 0
     page_size: int = 0
     ids: list[str] = Field(default_factory=list)
+    # Populated only when ``include_details=True``: the page's listings (aligned to
+    # ``ids``), so a search needs no follow-up ``get_car_details_batch`` call.
+    details: list[CarDetails] | None = None
 
 
 class Condition(AutoRiaModel):
@@ -216,6 +219,10 @@ class SimilarCar(AutoRiaModel):
     price_uah: str | None = None
     mileage_km: int | None = None
     fuel: str | None = None
+    engine_volume_l: float | None = None
+    # Whether this comp satisfies the requested cohort (year/volume bounds). Upstream
+    # comps can leak the cohort; this is the client-side membership check.
+    in_cohort: bool = True
     gearbox: str | None = None
     city: str | None = None
     url: str | None = None
@@ -238,21 +245,27 @@ class AveragePriceResult(AutoRiaModel):
     a figure we recompute — and it is only weakly sensitive to tight cohort filters
     (``engine_volume``/``modification``), so it should not be read as an
     engine-precise fair value. For that, prefer ``cohort_estimate_usd`` (the median
-    of the comparable listings). To make reliability legible (the API exposes no
-    population distribution — only a small ``similar_cars`` sample), we add the
-    sample size, the sample's own USD spread, and a ``price_consistency`` flag that
-    trips when the headline falls outside the spread of the very comps it cites.
-    ``status`` is ``insufficient_sample`` when the sample is too thin (< 5 comps) or
+    of the *in-cohort* comps — upstream comps can leak the cohort, so each is flagged
+    ``in_cohort`` against the requested year/volume bounds and only matches feed the
+    estimate; ``in_cohort_count`` reports how many qualified). To make reliability
+    legible (the API exposes no population distribution — only a small ``similar_cars``
+    sample), we add the sample size, the sample's own USD spread, and a
+    ``price_consistency`` flag that trips when the headline falls outside the spread of
+    the very comps it cites. ``status`` is ``insufficient_sample`` when fewer than 5
+    comps are in-cohort or
     when a tight cohort was requested yet the headline ignored it. ``cohort`` echoes
     the resolved filters.
     """
 
     avg_price_usd: int | None = None
     avg_price_uah: int | None = None
-    # Median of the comparable listings — the cohort-appropriate figure to prefer
-    # over the model-level ``avg_price_usd`` headline when a tight cohort was queried.
+    # Median of the *in-cohort* comparable listings — the cohort-appropriate figure to
+    # prefer over the model-level ``avg_price_usd`` headline when a tight cohort was
+    # queried. Null when no comp satisfies the requested cohort.
     cohort_estimate_usd: int | None = None
     sample_count: int = 0
+    # Of ``sample_count`` comps, how many satisfy the requested cohort (year/volume).
+    in_cohort_count: int = 0
     sample_min_usd: int | None = None
     sample_median_usd: int | None = None
     sample_max_usd: int | None = None
@@ -261,6 +274,9 @@ class AveragePriceResult(AutoRiaModel):
     cohort: dict[str, Any] | None = None
     period: int | None = None
     status: str = "ok"  # "ok" | "no_data" | "insufficient_sample"
+    # LOCAL, advisory, warn-only rolling counter (persisted on this machine) — NOT
+    # AUTO.RIA's enforced limit. `hour_count` can exceed `hour_limit`; calls are never
+    # blocked on it, so do not hard-gate paid requests on these numbers.
     quota: dict[str, int] | None = None
     similar_cars: list[SimilarCar] = Field(default_factory=list)
     statistic_data: list[StatisticDatum] = Field(default_factory=list)
@@ -306,3 +322,8 @@ class VinParams(AutoRiaModel):
     link: dict[str, Any] | None = None
     search_type: str | None = None
     notice: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ``SearchResult.details`` forward-references ``CarDetails`` (defined below it); resolve
+# the annotation now that the whole module namespace exists.
+SearchResult.model_rebuild()

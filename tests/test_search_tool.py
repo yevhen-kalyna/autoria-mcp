@@ -114,6 +114,50 @@ async def test_build_search_query_maps_to_v1_wire_names(
 
 
 @respx.mock
+async def test_search_include_details_attaches_batch(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """include_details=True enriches the page's ids in one call (no manual 2nd round)."""
+    _mock_brand_model()
+    respx.get(f"{BASE}/auto/search").mock(
+        return_value=httpx.Response(200, json=load_fixture("search"))
+    )
+    respx.get(f"{BASE}/auto/info").mock(return_value=httpx.Response(200, json=load_fixture("info")))
+    rt = make_runtime(settings)
+    async with rt.client:
+        result = await search_used_cars_impl(
+            rt, brand="BMW", model="3 Series", include_details=True
+        )
+    assert result.ids == ["39728975", "39837585", "39963555"]
+    assert result.details is not None
+    assert len(result.details) == len(result.ids)
+
+
+@respx.mock
+async def test_search_without_include_details_has_none(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    _mock_brand_model()
+    respx.get(f"{BASE}/auto/search").mock(
+        return_value=httpx.Response(200, json=load_fixture("search"))
+    )
+    rt = make_runtime(settings)
+    async with rt.client:
+        result = await search_used_cars_impl(rt, brand="BMW", model="3 Series")
+    assert result.details is None
+
+
+async def test_search_include_details_rejects_large_page_size(
+    settings: Settings, make_runtime: MakeRuntime
+) -> None:
+    """include_details fans out one detail call per id, so it's capped at the batch size."""
+    rt = make_runtime(settings)
+    async with rt.client:
+        with pytest.raises(AutoRiaError):
+            await search_used_cars_impl(rt, brand="BMW", include_details=True, page_size=51)
+
+
+@respx.mock
 async def test_search_hybrid_fuel_emits_multiple_type_params(
     settings: Settings, make_runtime: MakeRuntime
 ) -> None:
