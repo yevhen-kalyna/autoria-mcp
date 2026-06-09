@@ -74,7 +74,11 @@ def register_mirror_tools(mcp: FastMCP) -> None:
     async def list_generations(
         model_id: Annotated[int, Field(description="Model id.")],
     ) -> Any:
-        """List generations for a model. Cached 7 days."""
+        """List generations for a model. Cached 7 days.
+
+        Raw upstream shape (camelCase: `generationId`, `yearFrom`, `yearTo`). Note
+        `yearTo: 0` is a sentinel for "current / still produced", not a literal year.
+        """
         async with tool_errors():
             path = f"/generations/by/models/{model_id}/generations"
             return await cached_get(get_runtime(), path)

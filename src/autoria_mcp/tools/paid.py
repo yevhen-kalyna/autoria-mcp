@@ -403,9 +403,12 @@ def register_paid_tools(mcp: FastMCP) -> None:
         `sample_max_usd`, plus a `price_consistency` flag that is `avg_below_sample`/
         `avg_above_sample` when the headline falls outside its own comparables.
         `status` is `no_data` / `insufficient_sample` / `ok` — it is
-        `insufficient_sample` when the sample is thin (< 5 comps) or when a tight
-        cohort was requested yet the headline ignored it. `cohort` echoes the resolved
-        filters and `quota` reports remaining API budget.
+        `insufficient_sample` when fewer than 5 comps are in-cohort or when a tight
+        cohort was requested yet the headline ignored it. Comps are flagged `in_cohort`
+        and `cohort_estimate_usd` uses only those (`in_cohort_count` reports how many).
+        `cohort` echoes the resolved filters. `quota` is a LOCAL, advisory, warn-only
+        counter (it can exceed its limit and never blocks) — not AUTO.RIA's enforced
+        budget, so don't hard-gate on it.
 
         Note: facelifts are distinct `generation_id`s and this endpoint takes a
         single one — call once per generation to price a whole family.
