@@ -117,12 +117,17 @@ async def test_build_search_query_maps_to_v1_wire_names(
 async def test_search_include_details_attaches_batch(
     settings: Settings, make_runtime: MakeRuntime
 ) -> None:
-    """include_details=True enriches the page's ids in one call (no manual 2nd round)."""
+    """include_details=True enriches the page's ids in one call, aligned to ids."""
     _mock_brand_model()
     respx.get(f"{BASE}/auto/search").mock(
         return_value=httpx.Response(200, json=load_fixture("search"))
     )
-    respx.get(f"{BASE}/auto/info").mock(return_value=httpx.Response(200, json=load_fixture("info")))
+
+    def _info_echo(request: httpx.Request) -> httpx.Response:
+        auto_id = int(request.url.params["auto_id"])
+        return httpx.Response(200, json={"autoData": {"autoId": auto_id}, "markName": "BMW"})
+
+    respx.get(f"{BASE}/auto/info").mock(side_effect=_info_echo)
     rt = make_runtime(settings)
     async with rt.client:
         result = await search_used_cars_impl(
@@ -130,7 +135,8 @@ async def test_search_include_details_attaches_batch(
         )
     assert result.ids == ["39728975", "39837585", "39963555"]
     assert result.details is not None
-    assert len(result.details) == len(result.ids)
+    # Each detail is the listing for the id at the same position (not just same length).
+    assert [d.id for d in result.details] == [int(i) for i in result.ids]
 
 
 @respx.mock

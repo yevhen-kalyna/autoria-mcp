@@ -27,7 +27,7 @@ from pydantic import Field
 
 from autoria_mcp.cache import make_cache_key
 from autoria_mcp.client import AutoRiaError
-from autoria_mcp.models import SearchResult
+from autoria_mcp.models import CarDetails, SearchResult
 from autoria_mcp.runtime import RuntimeContext, get_runtime
 from autoria_mcp.shaping import cleaned_params, shape_search
 from autoria_mcp.tools._errors import tool_errors
@@ -269,7 +269,11 @@ async def search_used_cars_impl(
 
     result = shape_search(raw, page=page, page_size=page_size)
     if include_details and result.ids:
-        result.details = await get_car_details_batch_impl(rt, auto_ids=[int(i) for i in result.ids])
+        # The batch dedupes its input, so map results back by id to keep `details`
+        # strictly aligned to `ids` (same order, duplicates included).
+        batch = await get_car_details_batch_impl(rt, auto_ids=[int(i) for i in result.ids])
+        by_id = {d.id: d for d in batch}
+        result.details = [by_id.get(int(i)) or CarDetails(id=int(i)) for i in result.ids]
     return result
 
 
